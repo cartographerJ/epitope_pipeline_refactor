@@ -110,8 +110,9 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
                 target.gene_name, len(target.sequence))
 
     full_hits = []
+    residue_identity_scores = {}
     try:
-        full_hits, _ = _blast_full_sequence(
+        full_hits, residue_identity_scores = _blast_full_sequence(
             target.sequence, target.uniprot_id,
             exclude_gene_name=target.gene_name,
         )
@@ -119,10 +120,10 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
     except Exception as e:
         logger.warning("  Full-sequence BLAST failed: %s — falling back to per-patch", e)
 
-    # Binary specificity from ectodomain 3D patches
-    if ectodomain_patches and full_hits:
+    # Binary specificity from ectodomain 3D patches (FIXED: uses per-residue identity scores)
+    if ectodomain_patches and residue_identity_scores:
         residue_specificity = _screen_patches_binary(
-            ectodomain_patches, full_hits, len(target.sequence),
+            ectodomain_patches, residue_identity_scores, len(target.sequence),
         )
         n_nonspec = sum(1 for v in residue_specificity.values() if v is False)
         n_assessed = sum(1 for v in residue_specificity.values() if v is not None)
@@ -638,54 +639,38 @@ def _blast_sequence(query_sequence, exclude_accession=None):
 # Binary specificity screening (ectodomain 3D patches)
 # ---------------------------------------------------------------------------
 
-def _screen_patches_binary(ectodomain_patches, blast_hits, seq_len):
+def _screen_patches_binary(ectodomain_patches, residue_identity_scores, seq_len):
     """
-    Screen ectodomain 3D patches against BLAST hits for binary specificity.
+    Screen ectodomain patches using per-residue BLAST identity scores.
 
-    For each patch >= 600 A², check if any off-target BLAST HSP with
-    >= 95% identity covers >= 50% of the patch residues. If yes, all
-    patch residues are marked non-specific.
+    FIXED: Uses actual per-residue identity scores from BLAST, not HSP ranges.
+    A residue is "non-specific" if its identity to any human protein is
+    >= SPECIFICITY_IDENTITY_THRESHOLD.
 
     Args:
         ectodomain_patches: List of SurfacePatch objects (all exposed ectodomain).
-        blast_hits: List of hit dicts from full-sequence BLAST.
+        residue_identity_scores: Dict {resnum: float} — max BLAST identity per residue.
         seq_len: Total sequence length.
 
     Returns:
         Dict {resnum: bool or None} — True=specific, False=non-specific,
         None=not in any assessed patch.
     """
-    non_specific = set()
+    # Collect all assessed residues (those in any ectodomain patch)
     assessed = set()
-
     for patch in ectodomain_patches:
-        patch_set = set(patch.residue_numbers)
-        assessed.update(patch_set)
-        n_patch = len(patch_set)
+        assessed.update(patch.residue_numbers)
 
-        for hit in blast_hits:
-            if hit["identity"] < SPECIFICITY_IDENTITY_THRESHOLD:
-                continue
-
-            q_start = hit.get("query_start", 0)
-            q_end = hit.get("query_end", 0)
-
-            # Count patch residues within this HSP's query range
-            overlap = sum(1 for r in patch_set if q_start <= r <= q_end)
-
-            if overlap >= n_patch * 0.5:
-                non_specific.update(patch_set)
-                break
-
-    # Build per-residue binary map
+    # Build per-residue binary map using identity scores
     result = {}
     for i in range(1, seq_len + 1):
-        if i in non_specific:
-            result[i] = False
-        elif i in assessed:
-            result[i] = True
+        if i in assessed:
+            identity = residue_identity_scores.get(i, 0.0)
+            # True = specific (identity < threshold)
+            # False = non-specific (identity >= threshold)
+            result[i] = (identity < SPECIFICITY_IDENTITY_THRESHOLD)
         else:
-            result[i] = None
+            result[i] = None  # Not in any patch
 
     return result
 
