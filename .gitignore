@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Epitope Pipeline Specific
+cache/
+runs/
+raw_jobs/
+blast_db/
+epitope_pipeline_backup_*/
+
+# Large data files
+*.pdb
+*.cif
+
+# Logs
+*.log
+log.txt
+
+# Temporary files
+*.tmp
+*.bak
