@@ -119,6 +119,7 @@ BLAST_DELAY_SECONDS = 3                 # NCBI rate limit
 
 # Local BLAST database configuration
 USE_LOCAL_BLAST = True                  # Toggle: True = local blastp, False = remote NCBI API
+# Spaces in path are handled automatically (temp symlink created at runtime)
 LOCAL_BLAST_DB_PATH = PIPELINE_ROOT / "blast_db" / "swissprot" / "swissprot_human"
 
 # ---------------------------------------------------------------------------

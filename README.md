@@ -23,6 +23,9 @@ results = run_pipeline(["ERBB2"])
 # Multiple targets (gene names or UniProt IDs, can be mixed)
 results = run_pipeline(["ERBB2", "EGFR", "P04626"])
 
+# Isoform support (GENE.X notation or UniProt isoform IDs)
+results = run_pipeline(["CLDN18.2", "P56856-2"])  # Both formats supported
+
 # With custom thresholds
 results = run_pipeline(
     ["ERBB2"],
@@ -249,6 +252,8 @@ blastp -db epitope_pipeline/blast_db/swissprot/swissprot_human \
 - **Reliability**: No network dependency or NCBI service downtime
 - **No rate limiting**: Can run queries in parallel
 
+**Path with spaces**: The local BLAST database path is resolved automatically at runtime. If the path contains spaces (e.g., Dropbox directories), the pipeline creates a temporary symlink under `/tmp/` so that `blastp` can parse it correctly. No manual symlink setup is required.
+
 **Note**: SwissProt is updated quarterly by UniProt. Re-run the setup script periodically to refresh the database.
 
 ## Epitope Map Figure
@@ -283,6 +288,24 @@ For ectodomain-only crystal structures (no TM residues resolved), the membrane p
 Distances are measured as the projected distance along the membrane normal from the **bilayer surface** (top of the lipid bilayer = membrane center + half-thickness), not from the membrane center. This is equivalent to "height above the cell surface."
 
 The membrane surface is defined geometrically from the membrane half-thickness (15A default), which is more robust than using the most proximal ectodomain residue as a proxy — AlphaFold models predict in vacuum without membrane context, so juxtamembrane residues can artifactually collapse to membrane-plane height (observed for ERBB2 and EGFR).
+
+## Target Resolution
+
+### Gene Names and UniProt IDs
+
+The pipeline accepts three input formats:
+
+1. **Gene symbols** (e.g., `ERBB2`) — searched against reviewed human UniProt entries
+2. **UniProt accessions** (e.g., `P04626`) — used directly
+3. **Isoform notation** (e.g., `CLDN18.2` or `P56856-2`) — auto-detected and resolved to isoform-specific entries
+
+**Gene name validation** (March 2026): When searching by gene name, the pipeline now prioritizes results where the requested name is the **primary gene name**, not just an alias. This prevents incorrect mappings like `LY6G6D` → `Q5SQ64` (LY6G6F, where LY6G6D is only an alias) instead of the correct `LY6G6D` → `O95868`. If no exact primary name match is found, the pipeline falls back to the first search result with a warning.
+
+**Isoform support** (March 2026): The pipeline detects isoform notation in two formats:
+- **Dot notation**: `CLDN18.2` → searches for gene `CLDN18`, appends isoform `-2` to get `P56856-2`
+- **Dash notation**: `P56856-2` → recognized as UniProt isoform ID and used directly
+
+**Known limitation**: UniProt isoform entries (e.g., P56856-2) may lack feature annotations like transmembrane regions that are present in the canonical entry. For membrane proteins specified via isoform notation, TM annotations must be manually verified.
 
 ## Cynomolgus Ortholog Resolution
 

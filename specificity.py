@@ -44,6 +44,43 @@ from epitope_pipeline.config import (
 
 logger = logging.getLogger(__name__)
 
+# Resolved BLAST DB path — if the configured path contains spaces (which
+# blastp can't handle), we create a symlink under /tmp and use that instead.
+_resolved_blast_db_path: Optional[str] = None
+
+
+def _get_blast_db_path() -> str:
+    """Return a blast-safe database path, creating a temp symlink if needed."""
+    global _resolved_blast_db_path
+    if _resolved_blast_db_path is not None:
+        return _resolved_blast_db_path
+
+    db_str = str(LOCAL_BLAST_DB_PATH)
+    if " " not in db_str:
+        _resolved_blast_db_path = db_str
+        return _resolved_blast_db_path
+
+    # blastp can't handle spaces in -db path — symlink the parent directory
+    link_dir = Path(tempfile.gettempdir()) / "blast_db_link"
+    target_dir = LOCAL_BLAST_DB_PATH.parent
+    # Recreate symlink if it doesn't point to the right place
+    if link_dir.is_symlink():
+        if link_dir.resolve() != target_dir.resolve():
+            link_dir.unlink()
+            link_dir.symlink_to(target_dir)
+    elif not link_dir.exists():
+        link_dir.symlink_to(target_dir)
+    else:
+        # Something non-symlink exists at this path — remove and recreate
+        import shutil
+        shutil.rmtree(str(link_dir), ignore_errors=True)
+        link_dir.symlink_to(target_dir)
+
+    _resolved_blast_db_path = str(link_dir / LOCAL_BLAST_DB_PATH.name)
+    logger.info("  BLAST DB path contains spaces — using symlink: %s",
+                _resolved_blast_db_path)
+    return _resolved_blast_db_path
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -101,7 +138,9 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
             )
             logger.error(error_msg)
             raise FileNotFoundError(error_msg)
-        logger.debug("  Using local BLAST database: %s", LOCAL_BLAST_DB_PATH)
+        # Resolve path (creates temp symlink if path contains spaces)
+        resolved = _get_blast_db_path()
+        logger.debug("  Using local BLAST database: %s", resolved)
     else:
         logger.debug("  Using remote NCBI BLAST API")
 
@@ -275,10 +314,10 @@ def _run_local_blast(sequence: str) -> str:
         query_file = f.name
 
     try:
-        # Build blastp command
+        # Build blastp command (use resolved path to avoid spaces)
         cmd = [
             "blastp",
-            "-db", str(LOCAL_BLAST_DB_PATH),
+            "-db", _get_blast_db_path(),
             "-query", query_file,
             "-evalue", str(BLAST_EVALUE_CUTOFF),
             "-word_size", str(BLAST_WORD_SIZE),
