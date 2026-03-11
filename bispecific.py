@@ -91,6 +91,8 @@ def run_bispecific(
     proximal_max_distance_a=None,
     cyno_max_mismatches=None,
     specificity_threshold=None,
+    cyno_mismatch_percent=None,
+    nonspecific_percent=None,
     force_experimental=False,
     verbose=True,
 ):
@@ -102,8 +104,10 @@ def run_bispecific(
         run_name: Optional custom run directory name.
         distal_min_distance_a: Override distal threshold (default 60A).
         proximal_max_distance_a: Override proximal threshold (default 40A).
-        cyno_max_mismatches: Override max cyno mismatches per 600A² (default 2).
-        specificity_threshold: Override specificity threshold.
+        cyno_max_mismatches: Override max cyno mismatches per 600A² (default 2) [DEPRECATED].
+        specificity_threshold: Override specificity threshold [DEPRECATED].
+        cyno_mismatch_percent: Override cyno mismatch percent threshold (default 15.0).
+        nonspecific_percent: Override nonspecific percent threshold (default 15.0).
         force_experimental: Use experimental PDB instead of AlphaFold.
         verbose: Whether to log to console.
 
@@ -113,7 +117,13 @@ def run_bispecific(
     distal_dist = distal_min_distance_a or config.DISTAL_MIN_DISTANCE_A
     proximal_dist = proximal_max_distance_a or config.PROXIMAL_MAX_DISTANCE_A
 
-    # Apply threshold overrides
+    # Apply threshold overrides (new whole-patch percent thresholds)
+    if cyno_mismatch_percent is not None:
+        config.MAX_CYNO_MISMATCH_PERCENT = cyno_mismatch_percent
+    if nonspecific_percent is not None:
+        config.MAX_NONSPECIFIC_PERCENT = nonspecific_percent
+
+    # Apply legacy threshold overrides (deprecated)
     if cyno_max_mismatches is not None:
         config.MAX_CYNO_MISMATCHES_PER_600A2 = cyno_max_mismatches
     if specificity_threshold is not None:

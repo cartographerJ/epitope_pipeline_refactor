@@ -1,12 +1,11 @@
 """
 Step 6: Cynomolgus Monkey Conservation — map sequence conservation onto
-surface patches and filter by mismatch count (max 2 per 600A² of patch area).
+surface patches and filter by percentage of mismatched residues.
 
 Performs pairwise Needleman-Wunsch alignment between human and cyno
 ortholog sequences, maps conservation per-residue onto the 3D structure,
-and evaluates each surface patch. When a patch has locally concentrated
-mismatches, the failing residues are trimmed and the survivors re-clustered
-into sub-patches that may still qualify.
+and evaluates each surface patch as an atomic unit. Patches with ≤15%
+mismatched residues pass filtering (default threshold).
 """
 
 import logging
@@ -16,8 +15,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from epitope_pipeline import config
 from epitope_pipeline.config import (
-    MAX_CYNO_MISMATCHES_PER_600A2,
+    MAX_CYNO_MISMATCHES_PER_600A2,  # Deprecated, kept for backward compatibility
     PATCH_CLUSTERING_DISTANCE_A,
     VHH_FOOTPRINT_MIN_A2,
 )
@@ -59,16 +59,13 @@ def analyze_conservation(target, surface_analysis, ca_coords=None):
     Steps:
       1. Align human and cyno sequences (Needleman-Wunsch, BLOSUM62)
       2. Map alignment to per-residue identity
-      3. For each surface patch: calculate conservation fraction
-      4. Sliding window: identify residues in locally dense mismatch regions
-      5. Trim failing residues, re-cluster survivors into sub-patches >= 600A²
-      6. Sub-patch check: verify conserved residues form contiguous >= 600A²
+      3. For each surface patch: calculate percentage of mismatched residues
+      4. Accept patches with ≤15% mismatches (configurable threshold)
 
     Args:
         target: TargetInfo with sequence and cyno_sequence.
         surface_analysis: SurfaceAnalysis with patches to evaluate.
-        ca_coords: Optional dict {resnum: np.array} for 3D checks.
-                   If None, the 3D checks are skipped.
+        ca_coords: Optional dict {resnum: np.array} (deprecated, not used).
 
     Returns:
         ConservationResult with filtered patches and conservation data.
@@ -112,104 +109,42 @@ def analyze_conservation(target, surface_analysis, ca_coords=None):
             patch_conservation={},
         )
 
-    # Step 3-6: Evaluate each patch
+    # Step 3: Evaluate each patch (whole-patch mode, no trimming)
     conserved_patches = []
     rejected_patches = []
     patch_conservation = {}
-    next_patch_id = max(p.patch_id for p in surface_analysis.patches) + 1
 
     for patch in surface_analysis.patches:
-        # Calculate patch-level conservation
+        # Calculate patch-level metrics
         n_residues = len(patch.residue_numbers)
         n_conserved = sum(
             1 for r in patch.residue_numbers
             if residue_conservation.get(r, False)
         )
         n_mismatches = n_residues - n_conserved
-        identity = n_conserved / n_residues if n_residues > 0 else 0.0
-        patch_conservation[patch.patch_id] = identity
+        identity_fraction = n_conserved / n_residues if n_residues > 0 else 0.0
+        mismatch_percent = (n_mismatches / n_residues) * 100.0
+
+        patch_conservation[patch.patch_id] = identity_fraction
 
         logger.info(
             "    Patch %d: %d residues (%.0f A²), cyno identity %.1f%% "
-            "(%d/%d conserved, %d mismatches)",
+            "(%d conserved, %d mismatches = %.1f%%)",
             patch.patch_id, n_residues, patch.total_sasa_a2,
-            identity * 100, n_conserved, n_residues, n_mismatches,
+            identity_fraction * 100, n_conserved, n_mismatches, mismatch_percent,
         )
 
-        # Gate 1: Sliding window — identify residues in mismatch-dense regions
-        if ca_coords and n_mismatches > 0:
-            worst_pos, worst_count = check_local_mismatch_density(
-                patch.residue_numbers, residue_conservation, ca_coords,
-            )
-            if worst_count > MAX_CYNO_MISMATCHES_PER_600A2:
-                # Trim failing residues and try to salvage sub-patches
-                failing = identify_failing_residues(
-                    patch.residue_numbers, residue_conservation, ca_coords,
-                    MAX_CYNO_MISMATCHES_PER_600A2,
-                )
-                survivors = [r for r in patch.residue_numbers if r not in failing]
-                logger.info(
-                    "      Sliding window: %d residues in mismatch-dense zones "
-                    "(worst: res %d with %d), trimming...",
-                    len(failing), worst_pos, worst_count,
-                )
+        # Whole-patch evaluation
+        passes, _ = evaluate_patch_conservation(patch, residue_conservation)
 
-                # Re-cluster survivors
-                sub_patches = _recluster_survivors(
-                    survivors, ca_coords, surface_analysis.residue_sasa,
-                    patch, residue_conservation, next_patch_id,
-                )
-
-                if sub_patches:
-                    for sp in sub_patches:
-                        # Record conservation for sub-patch
-                        sp_n = len(sp.residue_numbers)
-                        sp_conserved = sum(
-                            1 for r in sp.residue_numbers
-                            if residue_conservation.get(r, False)
-                        )
-                        sp_identity = sp_conserved / sp_n if sp_n > 0 else 0.0
-                        patch_conservation[sp.patch_id] = sp_identity
-                        conserved_patches.append(sp)
-                        logger.info(
-                            "      -> Sub-patch %d: %d residues, %.0f A², "
-                            "cyno %.1f%% -> PASSED",
-                            sp.patch_id, sp_n, sp.total_sasa_a2,
-                            sp_identity * 100,
-                        )
-                        next_patch_id = sp.patch_id + 1
-                else:
-                    rejected_patches.append((patch, identity))
-                    logger.info(
-                        "      -> REJECTED (no surviving sub-patches >= %.0f A²)",
-                        VHH_FOOTPRINT_MIN_A2,
-                    )
-                continue
-            logger.info(
-                "      Sliding window OK (worst: %d mismatches near res %d)",
-                worst_count, worst_pos,
-            )
-
-        # Gate 2: 3D sub-patch check — verify that conserved residues form
-        # a contiguous surface region large enough for VHH binding
-        if ca_coords:
-            conserved_residues = [
-                r for r in patch.residue_numbers
-                if residue_conservation.get(r, False) and r in ca_coords
-            ]
-            passes_subpatch = _check_conserved_subpatch(
-                conserved_residues, ca_coords, surface_analysis.residue_sasa,
-            )
-            if not passes_subpatch:
-                rejected_patches.append((patch, identity))
-                logger.info(
-                    "      -> REJECTED (conserved residues don't form contiguous "
-                    "patch >= %.0f A²)", VHH_FOOTPRINT_MIN_A2,
-                )
-                continue
-
-        conserved_patches.append(patch)
-        logger.info("      -> PASSED")
+        if passes:
+            conserved_patches.append(patch)
+            logger.info("      -> PASSED (%.1f%% mismatches < %.1f%% threshold)",
+                       mismatch_percent, config.MAX_CYNO_MISMATCH_PERCENT)
+        else:
+            rejected_patches.append((patch, identity_fraction))
+            logger.info("      -> REJECTED (%.1f%% mismatches > %.1f%% threshold)",
+                       mismatch_percent, config.MAX_CYNO_MISMATCH_PERCENT)
 
     logger.info(
         "  %s conservation: %d patches pass, %d rejected",
@@ -349,7 +284,42 @@ def _map_alignment_to_residues(aligned_human, aligned_cyno):
 
 
 # ---------------------------------------------------------------------------
-# Sliding window mismatch density check (public — used by specificity.py)
+# Whole-patch evaluation (NEW)
+# ---------------------------------------------------------------------------
+
+def evaluate_patch_conservation(patch, residue_conservation):
+    """
+    Evaluate a patch based on percentage of mismatched residues.
+
+    Args:
+        patch: SurfacePatch object.
+        residue_conservation: Dict {resnum: bool} — True=conserved, False=mismatch.
+
+    Returns:
+        Tuple (passes, mismatch_percent):
+            - passes: True if patch meets criteria.
+            - mismatch_percent: Float percentage (0-100).
+    """
+    from .config import MAX_CYNO_MISMATCH_PERCENT
+
+    n_residues = len(patch.residue_numbers)
+    if n_residues == 0:
+        return False, 100.0
+
+    n_conserved = sum(
+        1 for r in patch.residue_numbers
+        if residue_conservation.get(r, False)
+    )
+    n_mismatches = n_residues - n_conserved
+    mismatch_percent = (n_mismatches / n_residues) * 100.0
+
+    passes = (mismatch_percent <= MAX_CYNO_MISMATCH_PERCENT)
+
+    return passes, mismatch_percent
+
+
+# ---------------------------------------------------------------------------
+# DEPRECATED: Sliding window mismatch density check (kept for reference)
 # ---------------------------------------------------------------------------
 
 def check_local_mismatch_density(patch_residues, residue_conservation, ca_coords):

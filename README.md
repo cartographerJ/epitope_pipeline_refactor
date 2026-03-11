@@ -9,8 +9,8 @@ This pipeline takes a list of membrane protein targets and systematically identi
 1. **Structurally resolved** — uses AlphaFold DB full-length predictions by default, or experimental PDB structures via opt-in
 2. **Distal from the membrane** — ≥80 Angstroms from the membrane surface (default; configurable)
 3. **Surface accessible** — solvent-exposed patches large enough for a VHH CDR footprint (≥600 A²)
-4. **Cynomolgus-conserved** — max 2 cyno mismatches per ~600 A² VHH footprint (3D sliding window)
-5. **Target-specific** — max 2 non-specific residues per ~600 A² VHH footprint (3D sliding window, ≥75% off-target BLAST identity)
+4. **Cynomolgus-conserved** — ≤15% cyno mismatches per patch (whole-patch evaluation; configurable threshold)
+5. **Target-specific** — ≤15% non-specific residues per patch (whole-patch evaluation; ≥70% off-target BLAST identity threshold)
 
 ## Quick Start
 
@@ -26,10 +26,11 @@ results = run_pipeline(["ERBB2", "EGFR", "P04626"])
 # With custom thresholds
 results = run_pipeline(
     ["ERBB2"],
-    min_distance_a=60.0,            # Override 80A default
-    cyno_max_mismatches=3,          # Override 2 mismatches per 600A² default
-    specificity_threshold=0.90,     # Override 0.75 default
-    force_experimental=True,        # Use experimental PDB instead of AlphaFold DB
+    min_distance_a=60.0,                # Override 80A default
+    max_cyno_mismatch_percent=20.0,     # Override 15% default (more permissive)
+    max_nonspecific_percent=20.0,       # Override 15% default (more permissive)
+    specificity_threshold=0.75,         # Override 0.70 default (stricter off-target identity)
+    force_experimental=True,            # Use experimental PDB instead of AlphaFold DB
 )
 ```
 
@@ -48,11 +49,57 @@ python -m epitope_pipeline.run ERBB2 EGFR
 | 3 | `membrane.py` | Define membrane plane (OPM, TM annotations, or GPI-anchor) |
 | 4 | `spatial.py` | Filter to ectodomain residues ≥80A from membrane surface (default; bispecific uses 60A/40A) |
 | 5 | `surface.py` | Calculate SASA, cluster into surface patches ≥600 A² |
-| 6 | `conservation.py` | Align with cyno ortholog, sliding window mismatch check + contiguous sub-patch |
-| 7 | `specificity.py` | Full-sequence BLAST, sliding window non-specific density check |
+| 6 | `conservation.py` | Align with cyno ortholog, whole-patch evaluation (≤15% mismatches per patch) |
+| 7 | `specificity.py` | Full-sequence BLAST, whole-patch evaluation (≤15% non-specific per patch) + merge adjacent patches |
 | 8 | `scoring.py` | Composite score: area + distance + conservation + specificity + accessibility |
 | 9 | `export.py` | Generate all output files (CSV, XLSX, PDB, FASTA, JSON) |
 | 10 | `visualize.py` | 6-track epitope map with domains, distance, SASA, conservation, specificity |
+
+## Filtering Strategy: Whole-Patch Evaluation
+
+**March 2026 Update**: The pipeline uses a fundamentally different approach for conservation and specificity filtering compared to earlier versions.
+
+### Philosophy: VHH Binding Units
+
+VHH antibodies bind contiguous ~600 A² surface patches as atomic units. The CDR loops contact ~15-25 residues simultaneously, and not all contacted residues are equally critical for binding. This biological reality informs our filtering strategy:
+
+**Whole-patch evaluation** (current approach):
+- Each ≥600 A² patch is treated as an indivisible VHH binding surface
+- Accept/reject based on **percentage of problematic residues**
+- Simple pass/fail: "This patch has 8% cyno mismatches → PASS (under 15% threshold)"
+- Patches remain intact throughout filtering — no trimming, no size changes
+- Adjacent patches that pass filtering are merged into larger contiguous epitope regions (15Å centroid distance threshold)
+
+**Sliding window trim-and-recluster** (deprecated, pre-March 2026):
+- Scanned each residue's ~600 A² neighborhood for mismatches
+- If any window exceeded threshold, trimmed failing residues and re-clustered survivors
+- Could fragment a 149-residue patch into a 19-residue sub-patch
+- Biologically questionable: a VHH that binds the 149-residue surface won't bind the 19-residue fragment
+
+### Default Thresholds
+
+- **Cyno conservation**: ≤15% mismatches per patch (`MAX_CYNO_MISMATCH_PERCENT`)
+- **Human specificity**: ≤15% non-specific residues per patch (`MAX_NONSPECIFIC_PERCENT`)
+- **Post-filtering merge**: 15Å centroid distance (`MERGE_DISTANCE_THRESHOLD_A`)
+
+A 20-residue patch with 3 cyno mismatches = 15.0% → **PASS** (at threshold)
+A 25-residue patch with 4 cyno mismatches = 16.0% → **REJECT** (above threshold)
+
+### Tuning Guidance
+
+**If too restrictive** (rejecting viable targets):
+- Increase thresholds to 20-25%
+- Biological justification: VHH binding is forgiving; not all surface residues are contacted, and not all contacted residues are critical
+
+**If too permissive** (accepting risky patches):
+- Decrease thresholds to 10%
+- Use per-residue diagnostic visualizations to inspect exact problem locations
+
+**Parameter sweep**: Run the same target at multiple thresholds (10%, 15%, 20%, 25%) and compare patch counts to find the right balance for your portfolio.
+
+### Diagnostic Visualizations
+
+All per-residue conservation and specificity data is preserved for diagnostic purposes, even though filtering uses whole-patch evaluation. The epitope map tracks show raw per-residue data (mint = pass, red = fail), allowing you to see exactly where problematic residues are located, even when a patch passes the percentage threshold. For example, a patch with 12% mismatches (passing 15% threshold) will still show those specific mismatched residues in red on the conservation track.
 
 ## Output Files
 
@@ -118,11 +165,14 @@ All thresholds are defined in `config.py` and can be overridden via `run_pipelin
 | `ECTODOMAIN_MIN_DISTANCE_A` | 80.0 | Min Angstroms from membrane |
 | `RESOLUTION_THRESHOLD_A` | 3.5 | Max PDB resolution accepted |
 | `VHH_FOOTPRINT_MIN_A2` | 600.0 | Min surface patch area (A²) |
-| `MAX_CYNO_MISMATCHES_PER_600A2` | 2 | Max cyno mismatches per ~600A² VHH footprint |
-| `MAX_NONSPECIFIC_PER_600A2` | 2 | Max non-specific residues per ~600A² footprint |
-| `SPECIFICITY_IDENTITY_THRESHOLD` | 0.75 | Off-target BLAST identity for binary screening |
+| `MAX_CYNO_MISMATCH_PERCENT` | 15.0 | Max % cyno mismatches to accept patch (whole-patch evaluation) |
+| `MAX_NONSPECIFIC_PERCENT` | 15.0 | Max % non-specific residues to accept patch (whole-patch evaluation) |
+| `MERGE_DISTANCE_THRESHOLD_A` | 15.0 | Merge patches with centroids within 15Å (post-filtering) |
+| `SPECIFICITY_IDENTITY_THRESHOLD` | 0.70 | Off-target BLAST identity for marking residues as non-specific |
 | `PATCH_CLUSTERING_DISTANCE_A` | 8.0 | Cα-Cα distance for patch connectivity |
 | `MIN_ECTODOMAIN_COVERAGE` | 0.80 | Min PDB ectodomain coverage (applies when `force_experimental=True`) |
+| `MAX_CYNO_MISMATCHES_PER_600A2` | 2 | **DEPRECATED** — Legacy sliding window threshold (not used) |
+| `MAX_NONSPECIFIC_PER_600A2` | 2 | **DEPRECATED** — Legacy sliding window threshold (not used) |
 
 ## Structure Acquisition
 
@@ -210,9 +260,9 @@ Each target gets a 6-track linear sequence map:
 | **Domains** | Topology brackets + domain blocks | Extracellular/Cytoplasmic brackets above; InterPro domains (teal), UniProt domains (blue), TM (purple), SP (gray), Disordered (gray) blocks |
 | **Distance** | Distance from membrane (A) | Continuous line through all residues; ECD regions in teal fill, TM/cytoplasmic in light gray fill; dashed threshold line at the configured min distance |
 | **SASA** | Per-residue solvent-accessible surface area (A²) | Bar chart (teal) |
-| **Cyno Conservation** | Per-residue identity with cynomolgus ortholog | Mint = conserved, red = mismatch |
-| **Human Specificity** | Binary per-patch off-target screening (BLAST) | Mint = specific, red = non-specific (≥75% identity off-target HSP on ≥600 A² ectodomain patch) |
-| **Target Epitope** | Final qualifying patches | Green = passing all filters. Label: "Patch N — total A² \| score X.XX" |
+| **Cyno Conservation** | Per-residue identity with cynomolgus ortholog | Mint = conserved, red = mismatch. Shows raw per-residue data for diagnostic purposes; filtering uses whole-patch evaluation (≤15% mismatches per patch) |
+| **Human Specificity** | Per-residue off-target screening (BLAST) | Mint = specific, red = non-specific (≥70% identity off-target HSP). Shows raw per-residue data; filtering uses whole-patch evaluation (≤15% non-specific per patch) |
+| **Target Epitope** | Final qualifying patches (post-merge) | Green = passing all filters. Adjacent patches merged if centroids within 15Å. Label: "Patch N — total A² \| score X.XX" |
 
 Domain annotations are sourced from both UniProt (TM, Signal peptide, Domain, Region) and the InterPro API (ECD subdomains like Receptor L-domain, Furin-like cysteine-rich, etc.). InterPro entries that overlap significantly with UniProt features are automatically filtered out.
 
@@ -348,55 +398,12 @@ The dual PML scripts place two structures side-by-side on a shared membrane bila
 
 Epitope patches are shown as green surfaces (`show surface`) with 30% transparency. **Note**: PyMOL `ray_trace_mode 3` cannot render molecular surfaces — use `ray_trace_mode 0` or `1` for ray-traced images.
 
-### Bispecific Test Set
-
-| Pair | Score | Validity | Best Orientation | Notes |
-|------|-------|----------|------------------|-------|
-| ERBB2 x NECTIN4 | 1.016 | DUAL-VALID | NECTIN4(distal) x ERBB2(proximal) | Gold standard. ERBB2 prox trimmed: 83-res sub-patch salvaged from 129-res parent |
-| MSLN x ADAM8 | 0.833 | Single | MSLN(distal) x ADAM8(proximal) | Only one valid orientation |
-| ITGB6 x ADAM8 | 0.814 | Single | ITGB6(distal) x ADAM8(proximal) | Only one valid orientation |
-| CEACAM5 x MUCL3 | 0.000 | None | — | Cyno + specificity wipeout, no viable patches |
-
-## Test Set (22 targets)
-
-### Targets with qualifying epitope patches
-
-| Target | Gene | UniProt | Type | Structure | Patches | Score | Notes |
-|--------|------|---------|------|-----------|---------|-------|-------|
-| EGFR | EGFR | P00533 | Single-pass | 1YY9 (X-ray 2.6A) | 1 | 0.835 | Tested at 60A override |
-| NECTIN4 | NECTIN4 | Q96NY8 | Single-pass | AlphaFold DB v6 | 2 | 0.818 | 99.4% cyno, 100% patch conservation |
-| GPNMB | GPNMB | Q14956 | Single-pass | AlphaFold DB v6 | 3 | 0.803 | 1/4 patches rejected (85% cyno) |
-| ITGAV | ITGAV | P06756 | Single-pass | 3IJE (X-ray 2.9A) | 6 | 0.788 | 99.1% cyno, all specific |
-| FOLH1 | FOLH1 | Q04609 | Single-pass | 3BI1 (X-ray 1.5A) | 1 | 0.653 | 97.6% overall cyno, patch 100% |
-
-### Targets with 0 qualifying patches
-
-| Target | Gene | UniProt | Type | Structure | Rejection Reason |
-|--------|------|---------|------|-----------|------------------|
-| HER2 | ERBB2 | P04626 | Single-pass | AlphaFold DB v6 | Needs re-test with sliding window threshold (was rejected at 97.2% under old 98% threshold) |
-| ITGB6 | ITGB6 | P18564 | Single-pass | 4UM8 (X-ray 2.9A) | 33 res ≥80A, too few for ≥600A² patch |
-| ADAM8 | ADAM8 | P78325 | Single-pass | AlphaFold DB v6 | 4DD8 33% ECD → AF; max 79.5A |
-| MSLN | MSLN | Q13421 | GPI-anchored | AlphaFold DB v6 | 7UED 55% ECD → AF; cyno 85.1% |
-| MELTF | MELTF | P08582 | GPI-anchored | 6XR0 (X-ray 3.1A) | Max projected dist 80.2A (GPI PCA) |
-| CEA | CEACAM5 | P06731 | GPI-anchored | AlphaFold DB v6 | 8BW0 28% ECD → AF; cyno 62%, CEACAM cross-reactive |
-| CLDN18 | CLDN18 | P56856 | Multi-pass (4TM) | AlphaFold DB v6 | ECD loops only 36.6A |
-| CD19 | CD19 | P15391 | Single-pass | 6AL5 (X-ray 3.0A) | Patch cyno 82.4% |
-| CD20 | MS4A1 | P11836 | Multi-pass (4TM) | 8VGN (cryo-EM 2.5A) | Max 15.2A (short ECD loops) |
-| PD-L1 | CD274 | Q9NZQ7 | Single-pass | AlphaFold DB v6 | 5O45 53% ECD → AF; patch cyno 93.9% |
-| TROP2 | TACSTD2 | P09758 | Single-pass | 7PEE (X-ray 2.8A) | Max 62.9A |
-| HER3 | ERBB3 | P21860 | Single-pass | 1M6B (X-ray 2.6A) | Needs re-test (was rejected at 96.2% under old threshold) |
-| DLL3 | DLL3 | Q9NYJ7 | Single-pass | AlphaFold DB v6 | Max 67.1A |
-| CLDN6 | CLDN6 | P56747 | Multi-pass (4TM) | AlphaFold DB v6 | Max 34.8A (short ECD loops) |
-| FLT3 | FLT3 | P36888 | Single-pass | AlphaFold DB v6 | 1RJB 0% ECD → AF; needs re-test (was rejected at 97.9% under old threshold) |
-| BCMA | TNFRSF17 | Q02223 | Single-pass | 4ZFO (X-ray 1.9A) | Max 48.2A (tiny 54-res ECD) |
-| GPC3 | GPC3 | P51654 | GPI-anchored | 7ZAW (X-ray 2.6A) | Max 69.6A |
-
 ## Known Limitations
 
-| Limitation | Affected Targets | Details |
+| Limitation | Affected Protein Types | Details |
 |------------|-----------------|---------|
-| **PCA membrane normal for GPI proteins** | MELTF, GPC3 | For multi-lobe GPI-anchored proteins, PCA principal axis doesn't align with the max protein dimension. MELTF: 80A projected vs 107A Euclidean. GPC3: 69.6A projected. |
-| **Multi-pass TM — tiny ECD** | CLDN18, CLDN6, MS4A1 | Proteins with 4+ TM helices have short extracellular loops (CLDN18: 36.6A, CLDN6: 34.8A, MS4A1: 15.2A). Always 0 patches at 80A. |
-| **Monomer-only analysis** | ITGB6/ITGAV | Heterodimer interfaces (e.g., integrin αVβ6) are not captured — each chain is analyzed independently. |
-| **Low cyno conservation** | MSLN, CD19, CD274, CEACAM5 | Multiple ADC targets have clustered cyno mismatches that fail the sliding window check. Borderline targets (ERBB2, ERBB3, FLT3) need re-test with new threshold. |
-| **Small ectodomains** | TNFRSF17, TACSTD2, DLL3 | Ectodomains too small to reach 80A: BCMA (48A, 54 res), TROP2 (63A), DLL3 (67A). |
+| **PCA membrane normal for GPI proteins** | Multi-lobe GPI-anchored proteins | For GPI-anchored proteins with multiple structural domains, PCA principal axis may not align with the max protein dimension, leading to underestimated membrane distances. |
+| **Multi-pass TM — tiny ECD** | 4+ TM helix proteins | Proteins with 4+ TM helices typically have short extracellular loops (<40A from membrane), making them incompatible with the default 80A distance threshold. |
+| **Monomer-only analysis** | Hetero-oligomeric complexes | Heterodimer interfaces (e.g., integrin αVβ6) are not captured — each chain is analyzed independently. |
+| **Low cyno conservation** | Targets with clustered mismatches | Proteins with regions of low cynomolgus conservation (e.g., divergent gene families) may fail the 15% whole-patch threshold. Consider relaxing to 20-25% for challenging targets. |
+| **Small ectodomains** | Compact membrane proteins | Ectodomains too small to reach the default 80A threshold. Consider lowering `min_distance_a` for targets with known compact ectodomains (<70A). |

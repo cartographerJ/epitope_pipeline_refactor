@@ -1,12 +1,14 @@
 """
 Step 7: Human Proteome Specificity — screen epitope patches for cross-
-reactivity with other human proteins using a sliding window approach.
+reactivity with other human proteins using whole-patch evaluation.
 
 Uses NCBI BLASTp (remote API via BioPython) to search the full protein
-sequence against the human swissprot database. For each qualifying patch,
-a 3D sliding window checks that no ~600A² VHH footprint has more than
-MAX_NONSPECIFIC_PER_600A2 non-specific residues (covered by >=75% identity
-off-target HSPs).
+sequence against the human swissprot database. Each patch is evaluated
+as an atomic unit: patches with ≤15% non-specific residues (covered by
+≥70% identity off-target HSPs) pass filtering.
+
+After filtering, adjacent patches are merged into larger contiguous
+epitope regions.
 
 Results are cached to cache/blast/ for efficient re-runs.
 """
@@ -23,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from epitope_pipeline import config
 from epitope_pipeline.config import (
     BLAST_DATABASE,
     BLAST_DELAY_SECONDS,
@@ -32,14 +35,11 @@ from epitope_pipeline.config import (
     BLAST_WORD_SIZE,
     CACHE_DIR,
     LOCAL_BLAST_DB_PATH,
-    MAX_NONSPECIFIC_PER_600A2,
+    MAX_NONSPECIFIC_PER_600A2,  # Deprecated, kept for backward compatibility
+    MERGE_DISTANCE_THRESHOLD_A,
     RETRY_BLAST,
     SPECIFICITY_IDENTITY_THRESHOLD,
     USE_LOCAL_BLAST,
-)
-from epitope_pipeline.conservation import (
-    check_local_mismatch_density,
-    identify_failing_residues,
 )
 
 logger = logging.getLogger(__name__)
@@ -151,9 +151,6 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
     rejected_patches = []
     unscreened_patches = []
     all_blast_results = {}
-    next_patch_id = max(
-        (p.patch_id for p in conservation_result.conserved_patches), default=0
-    ) + 1
 
     total = len(conservation_result.conserved_patches)
     for idx, patch in enumerate(conservation_result.conserved_patches):
@@ -166,19 +163,18 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
         patch_hits = _filter_hits_to_patch(full_hits, patch.residue_numbers)
         all_blast_results[patch.patch_id] = patch_hits
 
-        # If full BLAST failed and we have no hits, fall back to per-patch BLAST
+        # Fallback to per-patch BLAST if full BLAST failed
         if not full_hits:
             segments = _extract_patch_sequences(target.sequence, patch.residue_numbers)
             blast_failed = False
             for seg_idx, (seq_segment, seg_start, seg_end) in enumerate(segments):
                 if len(seq_segment) < 10:
                     continue
-                logger.info("    Fallback: BLASTing segment %d: residues %d-%d (%d aa)",
+                logger.info("    Fallback BLAST: segment %d, residues %d-%d (%d aa)",
                             seg_idx, seg_start, seg_end, len(seq_segment))
                 try:
                     hits = _blast_sequence(seq_segment, exclude_accession=target.uniprot_id)
                     patch_hits.extend(hits)
-                    # Rate limit only for remote BLAST (local BLAST doesn't need it)
                     if not USE_LOCAL_BLAST and (seg_idx < len(segments) - 1 or idx < total - 1):
                         time.sleep(BLAST_DELAY_SECONDS)
                 except Exception as e:
@@ -189,50 +185,53 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
                 unscreened_patches.append(patch)
                 continue
 
-        # Check for disqualifying off-target hits (with trimming)
-        result = _check_patch_specificity(
-            patch_hits, patch, residue_specificity,
-            ca_coords=ca_coords,
-        )
+        # Whole-patch evaluation
+        passes, nonspecific_pct = evaluate_patch_specificity(patch, residue_specificity)
 
-        if result is None:
-            # Passed cleanly
+        if passes:
             specific_patches.append(patch)
-            logger.info("    Patch %d: PASSED specificity screen", patch.patch_id)
-        elif isinstance(result, list):
-            # Trimmed — result is a list of surviving sub-patches
-            if result:
-                for sp in result:
-                    sp.patch_id = next_patch_id
-                    specific_patches.append(sp)
-                    logger.info(
-                        "    Patch %d: trimmed -> sub-patch %d (%d residues, "
-                        "%.0f A²) PASSED",
-                        patch.patch_id, sp.patch_id,
-                        len(sp.residue_numbers), sp.total_sasa_a2,
-                    )
-                    next_patch_id += 1
-            else:
-                offending = _find_best_hit(patch_hits, patch.residue_numbers)
-                rejected_patches.append((patch, offending["accession"],
-                                         offending["identity"]))
-                logger.info(
-                    "    Patch %d: REJECTED — no sub-patches survive trimming",
-                    patch.patch_id,
-                )
+            logger.info(
+                "    Patch %d: PASSED (%.1f%% non-specific < %.1f%% threshold)",
+                patch.patch_id, nonspecific_pct, config.MAX_NONSPECIFIC_PERCENT,
+            )
         else:
-            # Direct rejection (dict = offending hit)
+            offending = _find_best_hit(patch_hits, patch.residue_numbers)
             rejected_patches.append((
                 patch,
-                result["accession"],
-                result["identity"],
+                offending["accession"],
+                offending["identity"],
             ))
             logger.info(
-                "    Patch %d: REJECTED — %.1f%% identity with %s (%s)",
-                patch.patch_id,
-                result["identity"] * 100,
-                result["accession"],
-                result.get("title", "")[:60],
+                "    Patch %d: REJECTED (%.1f%% non-specific > %.1f%% threshold) — "
+                "%.1f%% identity with %s",
+                patch.patch_id, nonspecific_pct, config.MAX_NONSPECIFIC_PERCENT,
+                offending["identity"] * 100, offending["accession"],
+            )
+
+    # Step 7.5: Merge adjacent patches
+    if specific_patches:
+        logger.info(
+            "  Merging adjacent patches (threshold=%.1f A)...",
+            MERGE_DISTANCE_THRESHOLD_A,
+        )
+
+        pre_merge_count = len(specific_patches)
+        specific_patches = merge_adjacent_patches(
+            specific_patches,
+            distance_threshold_a=MERGE_DISTANCE_THRESHOLD_A,
+        )
+        post_merge_count = len(specific_patches)
+
+        logger.info(
+            "    %d patches merged into %d regions",
+            pre_merge_count, post_merge_count,
+        )
+
+        # Log merged patch details
+        for patch in specific_patches:
+            logger.info(
+                "    Merged patch %d: %d residues, %.0f A²",
+                patch.patch_id, len(patch.residue_numbers), patch.total_sasa_a2,
             )
 
     logger.info(
@@ -788,6 +787,158 @@ def _find_best_hit(blast_hits, patch_residue_numbers):
         "title": "off-target",
     }
 
+
+# ---------------------------------------------------------------------------
+# Whole-patch evaluation (NEW)
+# ---------------------------------------------------------------------------
+
+def evaluate_patch_specificity(patch, residue_specificity):
+    """
+    Evaluate a patch based on percentage of non-specific residues.
+
+    Args:
+        patch: SurfacePatch object.
+        residue_specificity: Dict {resnum: bool or None} —
+            True=specific, False=non-specific, None=not assessed.
+
+    Returns:
+        Tuple (passes, nonspecific_percent):
+            - passes: True if patch meets criteria.
+            - nonspecific_percent: Float percentage (0-100).
+    """
+    patch_set = set(patch.residue_numbers)
+    n_total = len(patch_set)
+
+    # Count assessed residues
+    n_assessed = sum(1 for r in patch_set
+                     if residue_specificity.get(r) is not None)
+
+    if n_assessed == 0:
+        # No BLAST data — pass by default
+        return True, 0.0
+
+    # Count non-specific residues
+    n_nonspecific = sum(1 for r in patch_set
+                        if residue_specificity.get(r) is False)
+
+    nonspecific_percent = (n_nonspecific / n_total) * 100.0
+
+    passes = (nonspecific_percent <= config.MAX_NONSPECIFIC_PERCENT)
+
+    return passes, nonspecific_percent
+
+
+def merge_adjacent_patches(patches, distance_threshold_a=15.0):
+    """
+    Merge spatially adjacent patches into larger contiguous regions.
+
+    Uses centroid-based distance to identify adjacent patches, then merges
+    them into larger epitope regions. Patches within distance_threshold_a
+    of each other are merged.
+
+    Args:
+        patches: List of SurfacePatch objects.
+        distance_threshold_a: Distance threshold in Angstroms (default 15.0).
+
+    Returns:
+        List of merged SurfacePatch objects.
+    """
+    import numpy as np
+    from scipy.spatial.distance import pdist, squareform
+    from .surface import SurfacePatch
+
+    if len(patches) == 0:
+        return []
+
+    if len(patches) == 1:
+        return patches
+
+    # Calculate pairwise centroid distances
+    centroids = np.array([p.centroid for p in patches])
+    dist_matrix = squareform(pdist(centroids))
+
+    # Single-linkage clustering: merge patches within threshold
+    merged_groups = []
+    assigned = set()
+
+    for i, patch_i in enumerate(patches):
+        if i in assigned:
+            continue
+
+        # Start new group
+        group = [i]
+        assigned.add(i)
+
+        # Find all patches within threshold (transitively)
+        to_check = [i]
+        while to_check:
+            current = to_check.pop(0)
+            for j, patch_j in enumerate(patches):
+                if j in assigned:
+                    continue
+                if dist_matrix[current, j] <= distance_threshold_a:
+                    group.append(j)
+                    assigned.add(j)
+                    to_check.append(j)
+
+        merged_groups.append(group)
+
+    # Create merged patches
+    merged_patches = []
+    for group_idx, group in enumerate(merged_groups):
+        if len(group) == 1:
+            # Single patch, keep as-is
+            merged_patches.append(patches[group[0]])
+        else:
+            # Merge multiple patches
+            group_patches = [patches[i] for i in group]
+
+            # Combine residue numbers
+            all_residues = []
+            for p in group_patches:
+                all_residues.extend(p.residue_numbers)
+            merged_residues = sorted(set(all_residues))
+
+            # Combine residue AAs
+            merged_aas = {}
+            for p in group_patches:
+                merged_aas.update(p.residue_aas)
+
+            # Sum surface areas
+            total_sasa = sum(p.total_sasa_a2 for p in group_patches)
+
+            # Recalculate centroid (weighted by SASA)
+            weighted_centroid = sum(
+                p.centroid * p.total_sasa_a2 for p in group_patches
+            ) / total_sasa
+
+            # Recalculate max dimension
+            coords = np.array([p.centroid for p in group_patches])
+            max_dist = pdist(coords).max() if len(coords) > 1 else 0.0
+
+            # Average distance from membrane
+            avg_membrane_dist = np.mean([
+                p.avg_distance_from_membrane for p in group_patches
+            ])
+
+            # Create merged patch (use first patch's ID as base)
+            merged_patch = SurfacePatch(
+                patch_id=patches[group[0]].patch_id,
+                residue_numbers=merged_residues,
+                residue_aas=merged_aas,
+                total_sasa_a2=total_sasa,
+                centroid=weighted_centroid,
+                max_dimension_a=max_dist,
+                avg_distance_from_membrane=avg_membrane_dist,
+            )
+            merged_patches.append(merged_patch)
+
+    return merged_patches
+
+
+# ---------------------------------------------------------------------------
+# DEPRECATED: Sliding window functions (kept for reference)
+# ---------------------------------------------------------------------------
 
 def _recluster_specificity_survivors(survivors, ca_coords, original_patch):
     """

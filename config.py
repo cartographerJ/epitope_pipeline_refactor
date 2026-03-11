@@ -91,13 +91,25 @@ AA_1TO3 = {
 # ---------------------------------------------------------------------------
 # Conservation
 # ---------------------------------------------------------------------------
-MAX_CYNO_MISMATCHES_PER_600A2 = 2   # Max mismatches per 600A² of patch area
+# Whole-patch evaluation (NEW)
+MAX_CYNO_MISMATCH_PERCENT = 15.0        # Max % cyno mismatches to accept patch
+
+# DEPRECATED: Legacy sliding window threshold (not used in whole-patch mode)
+MAX_CYNO_MISMATCHES_PER_600A2 = 2       # Kept for backward compatibility only
 
 # ---------------------------------------------------------------------------
 # Specificity (BLAST)
 # ---------------------------------------------------------------------------
-SPECIFICITY_IDENTITY_THRESHOLD = 0.7   # >75% -> exclude patch
-MAX_NONSPECIFIC_PER_600A2 = 2           # Max non-specific residues per 600A² window
+SPECIFICITY_IDENTITY_THRESHOLD = 0.7    # >70% identity -> non-specific residue
+
+# Whole-patch evaluation (NEW)
+MAX_NONSPECIFIC_PERCENT = 15.0          # Max % non-specific residues to accept patch
+
+# DEPRECATED: Legacy sliding window threshold (not used in whole-patch mode)
+MAX_NONSPECIFIC_PER_600A2 = 2           # Kept for backward compatibility only
+
+# Post-filtering merge
+MERGE_DISTANCE_THRESHOLD_A = 15.0       # Merge patches with centroids within 15Å
 BLAST_EVALUE_CUTOFF = 0.001
 BLAST_WORD_SIZE = 3
 BLAST_DATABASE = "swissprot"
