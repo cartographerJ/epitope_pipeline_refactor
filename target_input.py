@@ -28,10 +28,10 @@ from epitope_pipeline.config import (
 
 logger = logging.getLogger(__name__)
 
-# UniProt accession regex patterns (6 or 10 char)
+# UniProt accession regex patterns (6 or 10 char, with optional isoform suffix)
 _ACCESSION_RE = re.compile(
-    r"^[OPQ][0-9][A-Z0-9]{3}[0-9]$"           # 6-char (e.g. P04626)
-    r"|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}$"  # 10-char
+    r"^[OPQ][0-9][A-Z0-9]{3}[0-9](-\d+)?$"           # 6-char (e.g. P04626 or P56856-2)
+    r"|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}(-\d+)?$"  # 10-char with optional isoform
 )
 
 
@@ -93,7 +93,18 @@ def resolve_targets(identifiers):
         if _is_accession(ident):
             uniprot_id = ident.upper()
         else:
-            uniprot_id = _search_uniprot_by_gene(ident)
+            # Check for isoform notation (e.g., CLDN18.2 or CLDN18-2)
+            isoform_suffix = ""
+            if "." in ident and ident.split(".")[-1].isdigit():
+                # GENE.X format (e.g., CLDN18.2)
+                gene_base, isoform_num = ident.rsplit(".", 1)
+                isoform_suffix = f"-{isoform_num}"
+                ident = gene_base
+                logger.info("  Detected isoform notation: %s → %s (isoform %s)",
+                           f"{gene_base}.{isoform_num}", gene_base, isoform_num)
+
+            base_id = _search_uniprot_by_gene(ident)
+            uniprot_id = base_id + isoform_suffix
 
         # Fetch full UniProt entry
         entry = _fetch_uniprot_entry(uniprot_id)
@@ -200,8 +211,31 @@ def _search_uniprot_by_gene(gene_name):
             "Try using a UniProt accession ID directly.".format(gene_name)
         )
 
-    # Take the first (best) result
-    accession = results[0]["primaryAccession"]
+    # Find result where primary gene name matches (not just an alias)
+    exact_match = None
+    for result in results:
+        gene_names = result.get("genes", [])
+        if gene_names:
+            primary_gene = gene_names[0].get("geneName", {}).get("value", "")
+            if primary_gene.upper() == gene_name.upper():
+                exact_match = result
+                break
+
+    # Use exact match if found, otherwise fall back to first result with warning
+    if exact_match:
+        result = exact_match
+    else:
+        result = results[0]
+        gene_names = result.get("genes", [])
+        if gene_names:
+            primary_gene = gene_names[0].get("geneName", {}).get("value", "")
+            logger.warning(
+                "  No exact primary gene name match for '%s'. Using UniProt %s (primary name: '%s') "
+                "where '%s' is listed as an alias. Consider using '%s' or UniProt ID directly.",
+                gene_name, result["primaryAccession"], primary_gene, gene_name, primary_gene
+            )
+
+    accession = result["primaryAccession"]
     logger.info("  Gene '%s' resolved to UniProt %s", gene_name, accession)
     return accession
 

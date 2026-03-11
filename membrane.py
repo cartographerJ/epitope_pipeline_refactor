@@ -263,13 +263,19 @@ def _annotate_gpi_anchored(target, structure, gpi_residue):
         GPI_EXTRAPOLATION_A,
     )
 
-    # Classify all resolved residues as extracellular (no TM)
+    # Classify resolved residues as extracellular (only those N-terminal to GPI anchor)
+    # Residues C-terminal to the GPI anchor are cleaved off or buried in membrane
     residue_topo = {}
     for res in chain:
         res_id = res.get_id()
         if res_id[0] != " " or "CA" not in res:
             continue
-        residue_topo[res_id[1]] = "extracellular"
+        resnum = res_id[1]
+        if resnum <= gpi_residue:
+            residue_topo[resnum] = "extracellular"
+        else:
+            # Residues after GPI anchor are not accessible (cleaved or membrane-embedded)
+            residue_topo[resnum] = "cytoplasmic"
 
     return MembraneAnnotation(
         uniprot_id=target.uniprot_id,
