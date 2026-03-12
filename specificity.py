@@ -98,6 +98,10 @@ class SpecificityResult:
     residue_specificity: dict = field(default_factory=dict)
     # {resnum (1-based): bool or None — True=specific, False=non-specific
     #  (in a >=600A² ectodomain patch with >=95% off-target), None=not assessed}
+    full_blast_hits: list = field(default_factory=list)
+    # All HSPs from _blast_full_sequence() — one dict per HSP
+    residue_identity_scores: dict = field(default_factory=dict)
+    # {resnum (1-based): float} — max off-target HSP identity covering each position
 
 
 class SpecificityError(Exception):
@@ -184,6 +188,8 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
             unscreened_patches=[],
             blast_results={},
             residue_specificity=residue_specificity,
+            full_blast_hits=full_hits,
+            residue_identity_scores=residue_identity_scores,
         )
 
     specific_patches = []
@@ -287,6 +293,8 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
         unscreened_patches=unscreened_patches,
         blast_results=all_blast_results,
         residue_specificity=residue_specificity,
+        full_blast_hits=full_hits,
+        residue_identity_scores=residue_identity_scores,
     )
 
 

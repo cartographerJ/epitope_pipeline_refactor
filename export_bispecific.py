@@ -10,6 +10,7 @@ from typing import Dict, List
 from epitope_pipeline.config import PALETTE, DUAL_PML_GAP_A
 from epitope_pipeline.export import (
     export_annotated_pdb,
+    export_blast_details,
     generate_membrane_cgo_pml,
     generate_shared_membrane_cgo_pml,
 )
@@ -54,7 +55,17 @@ def export_bispecific_all(run_dir, pair_results, zone_results,
         export_zone_annotated_pdb(run_dir, zr)
         exported_zones.add((uid, zone))
 
-    # 4. Dual PML scripts (one per valid orientation) → pymol/
+    # 4. BLAST detail files → blast/
+    exported_blast = set()
+    for key, zr in zone_results.items():
+        uid, zone = key
+        if uid in exported_blast:
+            continue
+        if zr.specificity_result:
+            export_blast_details(run_dir / "blast", zr.target, zr.specificity_result)
+            exported_blast.add(uid)
+
+    # 5. Dual PML scripts (one per valid orientation) → pymol/
     for pr in pair_results:
         for orientation in (pr.orientation_ab, pr.orientation_ba):
             if not orientation.is_valid:

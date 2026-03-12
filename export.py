@@ -29,6 +29,7 @@ from epitope_pipeline.config import (
     COLOR_MISMATCH,
     COLOR_TRANSMEMBRANE,
     PALETTE,
+    SPECIFICITY_IDENTITY_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,7 +106,13 @@ def export_all(
             epitope_scores.get(uid, []),
         )
 
-    # 5. JSON annotations (full intermediate data)
+    # 5. BLAST detail files
+    for target in targets:
+        uid = target.uniprot_id
+        if specificity_results.get(uid):
+            export_blast_details(run_dir / "blast", target, specificity_results[uid])
+
+    # 6. JSON annotations (full intermediate data)
     for target in targets:
         uid = target.uniprot_id
         export_annotation_json(
@@ -120,10 +127,120 @@ def export_all(
             target_metrics.get(uid, {}),
         )
 
-    # 6. Input manifest
+    # 7. Input manifest
     export_manifest(run_dir, targets, parameters)
 
     logger.info("All outputs written to: %s", run_dir)
+
+
+# ---------------------------------------------------------------------------
+# BLAST detail export
+# ---------------------------------------------------------------------------
+
+def export_blast_details(blast_dir, target, specificity_result):
+    """Write BLAST detail files: HSP summary + per-residue specificity.
+
+    Creates:
+      blast/{gene}_blast_hsps.csv         — one row per HSP with call
+      blast/{gene}_blast_specificity.csv  — one row per residue with top hit info
+    """
+    blast_dir = Path(blast_dir)
+    blast_dir.mkdir(parents=True, exist_ok=True)
+    gene = target.gene_name
+
+    hits = specificity_result.full_blast_hits
+    id_scores = specificity_result.residue_identity_scores
+    res_spec = specificity_result.residue_specificity
+    if not id_scores and not res_spec:
+        return
+
+    threshold_pct = SPECIFICITY_IDENTITY_THRESHOLD * 100
+
+    # --- HSP summary table ---------------------------------------------------
+    if hits:
+        hsps_path = blast_dir / f"{gene}_blast_hsps.csv"
+        sorted_hits = sorted(hits, key=lambda h: h.get("identity", 0), reverse=True)
+        with open(hsps_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "off_target", "accession", "hsp_range", "hsp_length",
+                "identical_positions", "identity_pct", "evalue", "call",
+            ])
+            for h in sorted_hits:
+                ident = h.get("identity", 0.0)
+                alen = h.get("align_length", 0)
+                qs = h.get("query_start", "")
+                qe = h.get("query_end", "")
+                title = h.get("title", "")
+                # Extract short protein name from sp|...|NAME description
+                short_name = title
+                if title.startswith("sp|"):
+                    parts = title.split("|")
+                    if len(parts) >= 3:
+                        short_name = parts[2].split(" OS=")[0]
+                if ident < 0.40 or alen < 30:
+                    call = "filtered (<40% or <30aa)"
+                elif ident >= SPECIFICITY_IDENTITY_THRESHOLD:
+                    call = "non-specific"
+                else:
+                    call = "specific"
+                writer.writerow([
+                    short_name, h.get("accession", ""),
+                    f"{qs}-{qe}", alen,
+                    h.get("identities", ""),
+                    f"{ident * 100:.1f}",
+                    f"{h.get('evalue', 0):.2e}",
+                    call,
+                ])
+        logger.info("  Wrote %d BLAST HSPs to %s", len(sorted_hits), hsps_path.name)
+
+    # --- Per-residue specificity table ---------------------------------------
+    # Build residue → top hit mapping from HSPs
+    # For each position, find the highest-identity qualifying HSP that covers it
+    residue_top_hit = {}  # {resnum: (identity, accession, title)}
+    for h in (hits or []):
+        ident = h.get("identity", 0.0)
+        alen = h.get("align_length", 0)
+        if ident < 0.40 or alen < 30:
+            continue
+        acc = h.get("accession", "")
+        title = h.get("title", "")
+        for pos in range(h.get("query_start", 0), h.get("query_end", 0) + 1):
+            current = residue_top_hit.get(pos)
+            if current is None or ident > current[0]:
+                residue_top_hit[pos] = (ident, acc, title)
+
+    out_path = blast_dir / f"{gene}_blast_specificity.csv"
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "residue_num", "aa", "max_off_target_identity_pct",
+            "top_hit_accession", "top_hit_protein",
+            "specific", "threshold_pct",
+        ])
+        for i, aa in enumerate(target.sequence, 1):
+            max_id = id_scores.get(i, 0.0)
+            top = residue_top_hit.get(i)
+            acc = top[1] if top else ""
+            prot = top[2] if top else ""
+            # Trim sp|...|NAME_HUMAN ... to just the gene-level name
+            if prot.startswith("sp|"):
+                parts = prot.split("|")
+                if len(parts) >= 3:
+                    prot = parts[2].split(" OS=")[0]  # e.g. "EGFR_HUMAN Epidermal growth factor receptor"
+            spec_val = res_spec.get(i)
+            if spec_val is True:
+                call = "yes"
+            elif spec_val is False:
+                call = "no"
+            else:
+                call = "not_assessed"
+            writer.writerow([
+                i, aa, f"{max_id * 100:.1f}", acc, prot,
+                call, f"{threshold_pct:.0f}",
+            ])
+    logger.info("  Wrote %d residue BLAST details to %s",
+                 len(target.sequence), out_path.name)
 
 
 # ---------------------------------------------------------------------------

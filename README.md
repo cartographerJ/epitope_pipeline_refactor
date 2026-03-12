@@ -124,6 +124,10 @@ runs/2026-02-24_erbb2_egfr/
 ├── annotations/
 │   ├── erbb2_annotation.json       # Full intermediate results (JSON)
 │   └── ...
+├── blast/
+│   ├── erbb2_blast_hsps.csv        # All BLAST HSPs with identity, range, and call
+│   ├── erbb2_blast_specificity.csv # Per-residue: max off-target identity, top hit, call
+│   └── ...
 ├── figures/
 │   ├── erbb2_epitope_map.png       # Linear epitope map
 │   ├── egfr_epitope_map.png
@@ -132,6 +136,17 @@ runs/2026-02-24_erbb2_egfr/
     ├── 1n8z.pdb                    # Downloaded/predicted structures
     └── ...
 ```
+
+### BLAST Detail Files
+
+The `blast/` directory contains two files per target for full transparency into the specificity analysis:
+
+**`{gene}_blast_hsps.csv`** — One row per BLAST HSP (high-scoring segment pair). Each row shows the off-target protein, alignment range, identity percentage, and call:
+- `non-specific` — identity >= 70%, covered residues marked non-specific
+- `specific` — identity < 70% but passes pre-filter (>= 40% identity, >= 30aa)
+- `filtered` — below pre-filter thresholds, not used for scoring
+
+**`{gene}_blast_specificity.csv`** — One row per residue in the target sequence. Shows the max off-target identity at each position, which protein drives that score, and the final binary call (specific/non-specific/not_assessed) against the 70% threshold.
 
 ### Annotated PDB Scoring Scheme
 
@@ -156,7 +171,7 @@ Each annotated PDB comes with a companion `.pml` script for PyMOL with clickable
 | Area | 25% | Patch size relative to VHH footprint (900 A²) |
 | Distance | 20% | Distance from membrane (normalized to 300A) |
 | Conservation | 25% | Cyno sequence identity within the patch |
-| Specificity | 20% | Binary: 1.0 if patch passes 75% screen, 0.0 if rejected |
+| Specificity | 20% | Patch-level off-target screen (% specific residues within patch) |
 | Accessibility | 10% | Average relative SASA (solvent exposure) |
 
 ## Configuration
@@ -394,6 +409,10 @@ runs/YYMMDD_HHMM_bispecific_erbb2_nectin/
 ├── bispecific_pairs.xlsx              # Color-formatted pair scores
 ├── input_manifest.json
 ├── log.txt
+├── blast/                             # BLAST detail files (per unique target)
+│   ├── ERBB2_blast_hsps.csv
+│   ├── ERBB2_blast_specificity.csv
+│   └── ...
 ├── figures/
 │   ├── bispecific_combined_*.png      # Side-by-side orientation comparison (3 tracks per target)
 │   ├── bispecific_*_distal__*.png     # Stacked dual-panel 6-track maps
@@ -430,3 +449,29 @@ Epitope patches are shown as green surfaces (`show surface`) with 30% transparen
 | **Monomer-only analysis** | Hetero-oligomeric complexes | Heterodimer interfaces (e.g., integrin αVβ6) are not captured — each chain is analyzed independently. |
 | **Low cyno conservation** | Targets with clustered mismatches | Proteins with regions of low cynomolgus conservation (e.g., divergent gene families) may fail the 15% whole-patch threshold. Consider relaxing to 20-25% for challenging targets. |
 | **Small ectodomains** | Compact membrane proteins | Ectodomains too small to reach the default 80A threshold. Consider lowering `min_distance_a` for targets with known compact ectodomains (<70A). |
+
+## Version Control
+
+This project is tracked in a **private GitHub repo**: `cartographybio/epitope_pipeline`, authenticated as `amartinko-cartography`.
+
+The git repository lives **inside** `epitope_pipeline/` (not the parent `Claude_Code/` directory).
+
+### Commit Guidelines
+
+Every commit message must include specifics about what changed. Do not use vague messages like "update code" or "fix bugs." Each commit should describe:
+
+1. **What was added, changed, or fixed** — name the files and functions affected
+2. **Why** — the motivation or user request that prompted the change
+3. **Behavioral impact** — what the pipeline does differently now (new outputs, changed thresholds, fixed bugs, etc.)
+
+Example:
+```
+Add BLAST detail export for specificity transparency
+
+Export per-run blast/ directory with two reference files:
+- {gene}_blast_hsps.csv: all HSPs with identity, range, and call
+- {gene}_blast_specificity.csv: per-residue identity scores with top hit
+
+Files modified: specificity.py (SpecificityResult fields), export.py
+(export_blast_details), export_bispecific.py (wiring)
+```
