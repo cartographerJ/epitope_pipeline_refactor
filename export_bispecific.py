@@ -65,11 +65,9 @@ def export_bispecific_all(run_dir, pair_results, zone_results,
             export_blast_details(run_dir / "blast", zr.target, zr.specificity_result)
             exported_blast.add(uid)
 
-    # 5. Dual PML scripts (one per valid orientation) → pymol/
+    # 5. Dual PML scripts (one per orientation) → pymol/
     for pr in pair_results:
         for orientation in (pr.orientation_ab, pr.orientation_ba):
-            if not orientation.is_valid:
-                continue
             export_bispecific_pml(
                 run_dir, pr, orientation, structures, membranes,
             )

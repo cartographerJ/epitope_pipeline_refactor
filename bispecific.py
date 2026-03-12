@@ -434,8 +434,6 @@ def run_bispecific(
 
     for pair_result in pair_results:
         for orientation in (pair_result.orientation_ab, pair_result.orientation_ba):
-            if not orientation.is_valid:
-                continue
             out_path = str(figures_dir / "bispecific_{}.png".format(
                 orientation.label.lower()
             ))

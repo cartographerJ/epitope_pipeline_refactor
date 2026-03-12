@@ -415,13 +415,13 @@ runs/YYMMDD_HHMM_bispecific_erbb2_nectin/
 │   └── ...
 ├── figures/
 │   ├── bispecific_combined_*.png      # Side-by-side orientation comparison (3 tracks per target)
-│   ├── bispecific_*_distal__*.png     # Stacked dual-panel 6-track maps
+│   ├── bispecific_*_distal__*.png     # Stacked dual-panel 6-track maps (both orientations)
 │   ├── bispecific_pair_summary.png    # Bar chart comparing pair scores
 │   └── zone_details/                  # Per-zone deep-dive maps
 │       ├── erbb2_distal_epitope_map.png
 │       └── ...                        # 4 zone-specific 6-track single-target maps
 ├── pymol/                             # All 3D artifacts
-│   ├── *_distal__*_proximal.pml       # Dual PML: both structures side-by-side
+│   ├── *_distal__*_proximal.pml       # Dual PML for each orientation (both always generated)
 │   │                                  #   with shared membrane bilayer CGO
 │   └── zone_sessions/                 # Per-zone deep-dive PDB + PML pairs
 │       ├── erbb2_distal_epitope.pdb
