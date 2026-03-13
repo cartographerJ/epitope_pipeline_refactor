@@ -30,12 +30,13 @@ class SpatialFilter:
     uniprot_id: str
     gene_name: str
     qualifying_residues: list           # Residue numbers passing the distance threshold
-    residue_distances: dict             # {residue_num: distance_from_membrane_A} (ALL residues)
+    residue_distances: dict             # {residue_num: distance_A} — Euclidean from anchor (single-pass TM) or projected (other)
     total_extracellular: int            # Count of all extracellular residues
     total_qualifying: int               # Count of residues >= min_distance
     max_distance: float                 # Maximum distance of any extracellular residue
     min_distance_threshold: float       # Threshold used (Angstroms)
     max_distance_threshold: float = None  # Upper bound (Angstroms), None if distal-only
+    residue_distances_projected: dict = None  # {residue_num: projected_distance_A} — old metric, for diagnostics
 
 
 # ---------------------------------------------------------------------------
@@ -107,13 +108,41 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
 
     # Re-zero distances to the membrane surface (top of bilayer).
     # raw distance is from membrane center; subtract half_thickness to get
-    # distance from the bilayer surface. This is more robust than using the
-    # most proximal ECD residue, which can be artifactually buried in
-    # AlphaFold models that lack membrane context (e.g., ERBB2, EGFR).
+    # distance from the bilayer surface.
     extracellular_set = set(extracellular_residues)
     surface_offset = membrane.membrane_half_thickness
     for r in residue_distances:
         residue_distances[r] = max(0.0, residue_distances[r] - surface_offset)
+
+    # Preserve projected distances for diagnostic comparison
+    residue_distances_projected = dict(residue_distances)
+
+    # For single-pass TM: switch ECD residues to Euclidean distance from
+    # the TM/ecto boundary CA atom. This captures the actual 3D spatial
+    # extent of kinked ectodomains (e.g., ROR1) that the normal-projected
+    # metric underestimates. TM/cytoplasmic residues keep projected values
+    # to preserve near-zero baseline in visualization.
+    if membrane.topology_type == "single_pass" and membrane.tm_segments:
+        tm_start, tm_end = membrane.tm_segments[0]
+        # Find which TM boundary is adjacent to ectodomain
+        if membrane.residue_topology.get(tm_start - 1) == "extracellular":
+            anchor_resnum = tm_start
+        elif membrane.residue_topology.get(tm_end + 1) == "extracellular":
+            anchor_resnum = tm_end
+        else:
+            anchor_resnum = None
+
+        if anchor_resnum and anchor_resnum in ca_coords:
+            anchor_ca = ca_coords[anchor_resnum]
+            for r in extracellular_residues:
+                if r in ca_coords:
+                    residue_distances[r] = float(np.linalg.norm(
+                        ca_coords[r] - anchor_ca
+                    ))
+            logger.info(
+                "  %s: Euclidean distances from TM anchor (res %d)",
+                target.gene_name, anchor_resnum,
+            )
 
     # Filter to EXTRACELLULAR residues meeting distance criteria
     if max_distance is not None:
@@ -171,6 +200,7 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
         max_distance=max_d,
         min_distance_threshold=min_distance if min_distance is not None else 0.0,
         max_distance_threshold=max_distance,
+        residue_distances_projected=residue_distances_projected,
     )
 
 
