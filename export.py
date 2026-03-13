@@ -36,6 +36,35 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _rotation_matrix_align(from_vec, to_vec):
+    """Rotation matrix that maps from_vec to to_vec (Rodrigues' formula)."""
+    a = np.asarray(from_vec, dtype=float)
+    b = np.asarray(to_vec, dtype=float)
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+    v = np.cross(a, b)
+    c = np.dot(a, b)
+    s = np.linalg.norm(v)
+    if s < 1e-8:
+        if c > 0:
+            return np.eye(3)
+        # 180-degree rotation: pick an arbitrary perpendicular axis
+        perp = np.array([1.0, 0.0, 0.0]) if abs(a[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        perp = perp - np.dot(perp, a) * a
+        perp = perp / np.linalg.norm(perp)
+        return 2.0 * np.outer(perp, perp) - np.eye(3)
+    K = np.array([
+        [0, -v[2], v[1]],
+        [v[2], 0, -v[0]],
+        [-v[1], v[0], 0],
+    ])
+    return np.eye(3) + K + K @ K * (1.0 - c) / (s * s)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -571,6 +600,31 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
         for d, resnum in proximal_candidates[:3]:
             membrane_ref_residues.add(resnum)
 
+    # --- Compute ecto-axis rotation for single-pass TM ---
+    # Rotate PDB coordinates so anchor→farthest aligns with Y-up and
+    # anchor sits at the origin. This makes kinked ectodomains (e.g. ROR1)
+    # extend straight up from the bilayer in PyMOL.
+    _rotation_mat = None
+    _rotation_origin = None
+    if (membrane and spatial_filter
+            and getattr(spatial_filter, 'anchor_resnum', None) is not None
+            and getattr(spatial_filter, 'farthest_resnum', None) is not None):
+        from epitope_pipeline.utils import extract_ca_coords as _extract_ca
+        _ca = _extract_ca(structure.pdb_path, structure.chain_id)
+        _a = _ca.get(spatial_filter.anchor_resnum)
+        _f = _ca.get(spatial_filter.farthest_resnum)
+        if _a is not None and _f is not None:
+            _axis = _f - _a
+            if np.linalg.norm(_axis) > 1.0:
+                _rotation_mat = _rotation_matrix_align(
+                    _axis / np.linalg.norm(_axis),
+                    np.array([0.0, 1.0, 0.0]))
+                _rotation_origin = _a.copy()
+                logger.info(
+                    "  %s: Rotating PDB coordinates "
+                    "(ecto-axis -> Y-up, anchor res %d at origin)",
+                    target.gene_name, spatial_filter.anchor_resnum)
+
     # --- Assign B-factors and occupancy ---
     for model in bio_structure:
         for chain in model:
@@ -619,6 +673,11 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
                 for atom in residue:
                     atom.set_bfactor(bfactor)
                     atom.set_occupancy(occupancy)
+                    if _rotation_mat is not None:
+                        pos = atom.get_vector().get_array()
+                        atom.set_coord(
+                            _rotation_mat @ (pos - _rotation_origin))
+
 
     # --- Write PDB ---
     out_path = Path(run_dir) / pdb_subdir / "{}_epitope.pdb".format(
@@ -733,6 +792,7 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
         dist_qualified, surf_exposed, cyno_conserved,
         patch_scores, membrane_ref_residues, residue_distances,
         scores, pdb_subdir=pdb_subdir,
+        pdb_rotated=(_rotation_mat is not None),
     )
 
 
@@ -741,7 +801,8 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
 # ---------------------------------------------------------------------------
 
 def generate_membrane_cgo_pml(membrane, pdb_path, chain_id,
-                               object_prefix="", translate_vec=None):
+                               object_prefix="", translate_vec=None,
+                               normal_override=None, center_override=None):
     """
     Generate PML lines for CGO membrane bilayer visualization.
 
@@ -757,14 +818,16 @@ def generate_membrane_cgo_pml(membrane, pdb_path, chain_id,
         chain_id: Chain ID in the PDB.
         object_prefix: Prefix for PyMOL object names (e.g., "Distal_").
         translate_vec: 3D translation vector for bispecific side-by-side view.
+        normal_override: Optional replacement for membrane normal (e.g., ecto-axis).
+        center_override: Optional replacement for membrane center.
 
     Returns:
         List of PML lines to insert into a .pml script.
     """
     from epitope_pipeline.utils import extract_ca_coords
 
-    center = membrane.membrane_center
-    normal = membrane.membrane_normal
+    center = np.asarray(center_override, dtype=float) if center_override is not None else membrane.membrane_center
+    normal = np.asarray(normal_override, dtype=float) if normal_override is not None else membrane.membrane_normal
     ht = membrane.membrane_half_thickness
 
     # In-plane basis vectors for the membrane plane
@@ -923,7 +986,8 @@ def generate_membrane_cgo_pml(membrane, pdb_path, chain_id,
 
 def generate_shared_membrane_cgo_pml(membrane_a, pdb_path_a, chain_a,
                                       membrane_b, pdb_path_b, chain_b,
-                                      translate_b=None):
+                                      translate_b=None,
+                                      normal_override=None, center_override=None):
     """
     Generate PML lines for a single shared membrane CGO spanning two structures.
 
@@ -939,6 +1003,8 @@ def generate_shared_membrane_cgo_pml(membrane_a, pdb_path_a, chain_a,
         pdb_path_b: Path to second target's PDB file.
         chain_b: Chain ID for second target.
         translate_b: 3D translation vector applied to structure B.
+        normal_override: Optional replacement for the averaged membrane normal.
+        center_override: Optional replacement for the averaged membrane center.
 
     Returns:
         List of PML lines to insert into a .pml script.
@@ -956,10 +1022,17 @@ def generate_shared_membrane_cgo_pml(membrane_a, pdb_path_a, chain_a,
     ht_b = membrane_b.membrane_half_thickness
 
     # Shared membrane plane: average center, normal, half-thickness
-    center = (center_a + center_b) / 2.0
-    avg_normal = (normal_a + normal_b) / 2.0
-    norm_len = np.linalg.norm(avg_normal)
-    normal = avg_normal / norm_len if norm_len > 1e-6 else normal_a
+    # (overrides take priority when provided)
+    if normal_override is not None:
+        normal = np.asarray(normal_override, dtype=float)
+    else:
+        avg_normal = (normal_a + normal_b) / 2.0
+        norm_len = np.linalg.norm(avg_normal)
+        normal = avg_normal / norm_len if norm_len > 1e-6 else normal_a
+    if center_override is not None:
+        center = np.asarray(center_override, dtype=float)
+    else:
+        center = (center_a + center_b) / 2.0
     ht = (ht_a + ht_b) / 2.0
 
     # In-plane basis vectors
@@ -1128,7 +1201,8 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
                          dist_qualified, surf_exposed, cyno_conserved,
                          patch_scores, membrane_ref_residues,
                          residue_distances, scores,
-                         pdb_subdir="annotated_pdbs"):
+                         pdb_subdir="annotated_pdbs",
+                         pdb_rotated=False):
     """
     Write a .pml PyMOL script that creates named, clickable selections
     in the PyMOL object panel (right sidebar).
@@ -1394,20 +1468,50 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
     # Membrane bilayer CGO disks
     if membrane:
         pdb_file = Path(run_dir) / pdb_subdir / "{}_epitope.pdb".format(gene)
-        lines.extend(generate_membrane_cgo_pml(
-            membrane, str(pdb_file), ch,
-        ))
+        if pdb_rotated:
+            # PDB coordinates are rotated: ecto-axis = Y-up, anchor at origin.
+            # Draw bilayer horizontally at Y = -half_thickness.
+            ht = membrane.membrane_half_thickness
+            lines.extend(generate_membrane_cgo_pml(
+                membrane, str(pdb_file), ch,
+                normal_override=np.array([0.0, 1.0, 0.0]),
+                center_override=np.array([0.0, -ht, 0.0]),
+            ))
+        else:
+            lines.extend(generate_membrane_cgo_pml(
+                membrane, str(pdb_file), ch,
+            ))
 
     # Final orientation
-    lines.extend([
-        "# --- Final display settings ---",
-        "deselect",
-        "orient {} and chain {}".format(pdb_name, ch),
-        "zoom {} and chain {}".format(pdb_name, ch),
-        "set ray_opaque_background, off",
-        "bg_color black",
-        "",
-    ])
+    if pdb_rotated:
+        # Coordinates already rotated so ecto-axis = Y-up.
+        # Identity view matrix: screen-right = X, screen-up = Y.
+        lines.extend([
+            "# --- Ectodomain-axis-aligned view (coordinates rotated) ---",
+            "deselect",
+            "set_view (\\",
+            "    1.000000, 0.000000, 0.000000,\\",
+            "    0.000000, 1.000000, 0.000000,\\",
+            "    0.000000, 0.000000, 1.000000,\\",
+            "    0.000000, 0.000000, -400.000000,\\",
+            "    0.00, 0.00, 0.00,\\",
+            "    100.000000, 900.000000, -20.000000)",
+            "",
+            "zoom",
+            "set ray_opaque_background, off",
+            "bg_color black",
+            "",
+        ])
+    else:
+        lines.extend([
+            "# --- Final display settings ---",
+            "deselect",
+            "orient {} and chain {}".format(pdb_name, ch),
+            "zoom {} and chain {}".format(pdb_name, ch),
+            "set ray_opaque_background, off",
+            "bg_color black",
+            "",
+        ])
 
     with open(pml_path, "w") as f:
         f.write("\n".join(lines))

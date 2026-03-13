@@ -37,6 +37,8 @@ class SpatialFilter:
     min_distance_threshold: float       # Threshold used (Angstroms)
     max_distance_threshold: float = None  # Upper bound (Angstroms), None if distal-only
     residue_distances_projected: dict = None  # {residue_num: projected_distance_A} — old metric, for diagnostics
+    anchor_resnum: int = None              # TM/ecto boundary residue used as distance origin (single-pass TM only)
+    farthest_resnum: int = None            # Residue with max Euclidean distance from anchor
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +124,8 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
     # extent of kinked ectodomains (e.g., ROR1) that the normal-projected
     # metric underestimates. TM/cytoplasmic residues keep projected values
     # to preserve near-zero baseline in visualization.
+    _anchor_resnum = None
+    _farthest_resnum = None
     if membrane.topology_type == "single_pass" and membrane.tm_segments:
         tm_start, tm_end = membrane.tm_segments[0]
         # Find which TM boundary is adjacent to ectodomain
@@ -139,9 +143,18 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
                     residue_distances[r] = float(np.linalg.norm(
                         ca_coords[r] - anchor_ca
                     ))
+            _anchor_resnum = anchor_resnum
+            _farthest_resnum = max(
+                (r for r in extracellular_residues if r in ca_coords),
+                key=lambda r: residue_distances[r],
+                default=None,
+            )
             logger.info(
-                "  %s: Euclidean distances from TM anchor (res %d)",
+                "  %s: Euclidean distances from TM anchor (res %d), "
+                "farthest ECD residue %s at %.1fA",
                 target.gene_name, anchor_resnum,
+                _farthest_resnum,
+                residue_distances.get(_farthest_resnum, 0.0) if _farthest_resnum else 0.0,
             )
 
     # Filter to EXTRACELLULAR residues meeting distance criteria
@@ -201,6 +214,8 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
         min_distance_threshold=min_distance if min_distance is not None else 0.0,
         max_distance_threshold=max_distance,
         residue_distances_projected=residue_distances_projected,
+        anchor_resnum=_anchor_resnum,
+        farthest_resnum=_farthest_resnum,
     )
 
 

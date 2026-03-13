@@ -614,25 +614,30 @@ def _score_orientation(distal_zone, proximal_zone):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python -m epitope_pipeline.bispecific TARGET_A:TARGET_B [...]")
-        print("")
-        print("Pairs specified as TARGET_A:TARGET_B (colon-separated)")
-        print("Targets can be UniProt IDs or gene names")
-        print("")
-        print("Example:")
-        print("  python -m epitope_pipeline.bispecific ERBB2:NECTIN4 ERBB2:MSLN")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Bispecific epitope pipeline")
+    parser.add_argument("pairs", nargs="+",
+                        help="TARGET_A:TARGET_B pairs (colon-separated)")
+    parser.add_argument("--distal", type=float, default=None,
+                        help="Distal min distance (A), default 60")
+    parser.add_argument("--proximal", type=float, default=None,
+                        help="Proximal max distance (A), default 40")
+    args = parser.parse_args()
 
     pairs = []
-    for arg in sys.argv[1:]:
+    for arg in args.pairs:
         if ":" not in arg:
             print("Error: pairs must be colon-separated (e.g. ERBB2:MSLN)")
             sys.exit(1)
         a, b = arg.split(":", 1)
         pairs.append((a.strip(), b.strip()))
 
-    results = run_bispecific(pairs)
+    results = run_bispecific(
+        pairs,
+        distal_min_distance_a=args.distal,
+        proximal_max_distance_a=args.proximal,
+    )
 
     print("\nDone: {}".format(results["run_dir"]))
     for pr in results.get("pair_results", []):

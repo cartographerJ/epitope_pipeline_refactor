@@ -300,9 +300,13 @@ For ectodomain-only crystal structures (no TM residues resolved), the membrane p
 
 ### Distance Measurement
 
-Distances are measured as the projected distance along the membrane normal from the **bilayer surface** (top of the lipid bilayer = membrane center + half-thickness), not from the membrane center. This is equivalent to "height above the cell surface."
+For **single-pass TM** proteins, distances are measured as the **Euclidean (3D) distance from the TM/ectodomain boundary Cα atom** (the anchor residue). This captures the true spatial extent of kinked or bent ectodomains that project sideways rather than straight up — the normal-projected distance underestimates these (e.g., ROR1 projects 54A along the membrane normal but extends 125A in 3D from its TM anchor).
+
+For **multi-pass TM** and **GPI-anchored** proteins, the projected distance along the membrane normal from the bilayer surface is used (no single TM anchor available).
 
 The membrane surface is defined geometrically from the membrane half-thickness (15A default), which is more robust than using the most proximal ectodomain residue as a proxy — AlphaFold models predict in vacuum without membrane context, so juxtamembrane residues can artifactually collapse to membrane-plane height (observed for ERBB2 and EGFR).
+
+The `SpatialFilter` result stores both metrics: `residue_distances` (primary — Euclidean for single-pass TM, projected for others) and `residue_distances_projected` (always projected, for diagnostics). It also records `anchor_resnum` (TM/ecto boundary) and `farthest_resnum` (most distal ECD residue) when available.
 
 ## Target Resolution
 
@@ -390,8 +394,11 @@ Evaluates pairs of membrane protein targets for complementary epitope space suit
 # Single pair
 python -m epitope_pipeline.bispecific ERBB2:NECTIN4
 
-# Multiple pairs
+# Multiple pairs (all results in one run directory)
 python -m epitope_pipeline.bispecific ERBB2:NECTIN4 ERBB2:MSLN
+
+# Custom distance thresholds
+python -m epitope_pipeline.bispecific ERBB2:NECTIN4 --distal 80 --proximal 30
 ```
 
 ### How it works
@@ -432,11 +439,13 @@ runs/YYMMDD_HHMM_bispecific_erbb2_nectin/
 
 ### Dual PML Alignment
 
-The dual PML scripts place two structures side-by-side on a shared membrane bilayer. Three alignment steps ensure a clean presentation regardless of membrane normal orientation:
+For **single-pass TM** targets, annotated PDB coordinates are rotated so the ecto-axis (anchor → farthest residue) aligns with Y-up and the anchor sits at the origin. This means kinked ectodomains extend straight up from the bilayer in PyMOL, and the bilayer CGO draws horizontally at Y = -half_thickness. When both targets in a bispecific pair are rotated, translation is purely along X and the shared bilayer is horizontal — no complex basis vector computation needed.
 
-1. **Membrane-aligned view**: A `set_view` rotation matrix is computed so screen-Y = membrane normal (membrane horizontal) and screen-X = side-by-side direction. An ectodomain-up check flips the view if needed.
-2. **Screen-right translation**: The proximal structure is translated along the `right` vector (perpendicular to the membrane normal in the viewing plane), not along model-X. This prevents vertical offset when the membrane normal is tilted relative to the model axes.
-3. **Vertical membrane alignment**: Both proteins' membrane centers are aligned along the normal axis so their TM regions sit at the same height in the shared bilayer. Without this, averaging two different membrane centers would bury one protein.
+For **multi-pass TM / GPI** targets (no single anchor), the PDB coordinates are unmodified and the dual PML uses membrane-normal-based alignment:
+
+1. **Membrane-aligned view**: A `set_view` rotation matrix is computed so screen-Y = membrane normal and screen-X = side-by-side direction. An ectodomain-up check flips the view if needed.
+2. **Screen-right translation**: The proximal structure is translated along the `right` vector (perpendicular to the membrane normal in the viewing plane), not along model-X.
+3. **Vertical membrane alignment**: Both proteins' membrane centers are aligned along the normal axis so their TM regions sit at the same height.
 
 Epitope patches are shown as green surfaces (`show surface`) with 30% transparency. **Note**: PyMOL `ray_trace_mode 3` cannot render molecular surfaces — use `ray_trace_mode 0` or `1` for ray-traced images.
 

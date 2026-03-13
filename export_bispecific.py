@@ -373,38 +373,51 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
 
     gap = DUAL_PML_GAP_A
 
-    # --- Compute membrane-aligned view basis EARLY ---
-    # This determines the translation direction so structures appear
-    # purely side-by-side on screen (no vertical offset).
+    # --- Compute translation and bilayer geometry ---
+    # If both zone PDBs have rotated coordinates (single-pass TM with
+    # ecto-axis → Y-up, anchor at origin), use simple X translation and
+    # a horizontal bilayer. Otherwise fall back to membrane-normal alignment.
     import numpy as np
-    normal_d = np.array(dz.membrane.membrane_normal)
-    normal_p = np.array(pz.membrane.membrane_normal)
-    avg_normal = normal_d + normal_p
-    n_len = np.linalg.norm(avg_normal)
-    avg_normal = avg_normal / n_len if n_len > 0 else np.array([0., 1., 0.])
 
-    # Orthonormal basis: screen_y = membrane normal, screen_x = side-by-side
-    up = avg_normal
-    right = np.array([1.0, 0.0, 0.0])
-    right = right - np.dot(right, up) * up  # Gram-Schmidt
-    if np.linalg.norm(right) < 0.01:
-        right = np.array([0.0, 0.0, 1.0])
+    def _is_rotated(zone):
+        sf = zone.spatial_filter
+        return (sf is not None
+                and getattr(sf, 'anchor_resnum', None) is not None
+                and getattr(sf, 'farthest_resnum', None) is not None)
+
+    both_rotated = _is_rotated(dz) and _is_rotated(pz)
+
+    if both_rotated:
+        # Both PDBs rotated: anchors at origin, ecto-axis = Y-up.
+        # Simple X translation, horizontal bilayer.
+        translate_vec = np.array([gap, 0.0, 0.0])
+        avg_ht = (dz.membrane.membrane_half_thickness +
+                  pz.membrane.membrane_half_thickness) / 2.0
+        cgo_center = np.array([gap / 2.0, -avg_ht, 0.0])
+        cgo_normal = np.array([0.0, 1.0, 0.0])
+    else:
+        # Membrane-normal-based alignment (multi-pass / GPI / mixed)
+        normal_d = np.array(dz.membrane.membrane_normal)
+        normal_p = np.array(pz.membrane.membrane_normal)
+        avg_normal = normal_d + normal_p
+        n_len = np.linalg.norm(avg_normal)
+        up = avg_normal / n_len if n_len > 0 else np.array([0., 1., 0.])
+
+        right = np.array([1.0, 0.0, 0.0])
         right = right - np.dot(right, up) * up
-    right = right / np.linalg.norm(right)
-    fwd = np.cross(right, up)
-    fwd = fwd / np.linalg.norm(fwd)
+        if np.linalg.norm(right) < 0.01:
+            right = np.array([0.0, 0.0, 1.0])
+            right = right - np.dot(right, up) * up
+        right = right / np.linalg.norm(right)
+        fwd = np.cross(right, up)
+        fwd = fwd / np.linalg.norm(fwd)
 
-    # Translate along the right vector so structures separate purely
-    # horizontally on screen (no vertical component from tilted normal).
-    # Also align membrane planes vertically: shift proximal along normal
-    # so both TM regions sit at the same height.
-    center_d = np.array(dz.membrane.membrane_center)
-    center_p_raw = np.array(pz.membrane.membrane_center)
-    vertical_offset = (np.dot(center_d, up) - np.dot(center_p_raw, up)) * up
-    translate_vec = right * gap + vertical_offset
-
-    center_p = center_p_raw + translate_vec
-    mem_center = (center_d + center_p) / 2.0
+        ref_d = np.array(dz.membrane.membrane_center)
+        ref_p = np.array(pz.membrane.membrane_center)
+        vertical_offset = (np.dot(ref_d, up) - np.dot(ref_p, up)) * up
+        translate_vec = right * gap + vertical_offset
+        cgo_center = None
+        cgo_normal = None
 
     lines = [
         "# ================================================================",
@@ -508,17 +521,23 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
             membrane_a=dz.membrane, pdb_path_a=distal_pdb_path, chain_a=distal_chain,
             membrane_b=pz.membrane, pdb_path_b=proximal_pdb_path, chain_b=proximal_chain,
             translate_b=translate_vec,
+            normal_override=cgo_normal,
+            center_override=cgo_center,
         ))
     elif dz.membrane:
         d_pdb_path = str(pdb_dir / "{}.pdb".format(distal_pdb))
         lines.extend(generate_membrane_cgo_pml(
             dz.membrane, d_pdb_path, distal_chain,
+            normal_override=cgo_normal,
+            center_override=cgo_center,
         ))
     elif pz.membrane:
         p_pdb_path = str(pdb_dir / "{}.pdb".format(proximal_pdb))
         lines.extend(generate_membrane_cgo_pml(
             pz.membrane, p_pdb_path, proximal_chain,
             translate_vec=translate_vec,
+            normal_override=cgo_normal,
+            center_override=cgo_center,
         ))
 
     # Labels
@@ -529,37 +548,58 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
         "",
     ])
 
-    # --- Membrane-aligned view (basis computed above) ---
-    lines.extend([
-        "# --- Membrane-aligned view ---",
-        "deselect",
-        "set_view (\\",
-        "    {:.6f}, {:.6f}, {:.6f},\\".format(right[0], right[1], right[2]),
-        "    {:.6f}, {:.6f}, {:.6f},\\".format(up[0], up[1], up[2]),
-        "    {:.6f}, {:.6f}, {:.6f},\\".format(fwd[0], fwd[1], fwd[2]),
-        "    0.000000, 0.000000, -400.000000,\\",
-        "    {:.2f}, {:.2f}, {:.2f},\\".format(
-            mem_center[0], mem_center[1], mem_center[2]),
-        "    100.000000, 900.000000, -20.000000)",
-        "",
-        "# Ensure ectodomain faces UP (flip if center of mass is below membrane)",
-        "python",
-        "from pymol import cmd",
-        "v = cmd.get_view()",
-        "com = cmd.centerofmass('visible')",
-        "mcx, mcy, mcz = {:.2f}, {:.2f}, {:.2f}".format(
-            mem_center[0], mem_center[1], mem_center[2]),
-        "dx = com[0] - mcx",
-        "dy = com[1] - mcy",
-        "dz2 = com[2] - mcz",
-        "sy_com = v[3]*dx + v[4]*dy + v[5]*dz2",
-        "if sy_com < 0:",
-        "    cmd.turn('x', 180)",
-        "python end",
-        "",
-        "zoom",
-        "",
-    ])
+    # --- View ---
+    if both_rotated:
+        # Both PDBs rotated: ecto-axis = Y-up. Identity view + zoom.
+        lines.extend([
+            "# --- Ectodomain-axis-aligned view (coordinates rotated) ---",
+            "deselect",
+            "set_view (\\",
+            "    1.000000, 0.000000, 0.000000,\\",
+            "    0.000000, 1.000000, 0.000000,\\",
+            "    0.000000, 0.000000, 1.000000,\\",
+            "    0.000000, 0.000000, -400.000000,\\",
+            "    {:.2f}, 0.00, 0.00,\\".format(gap / 2.0),
+            "    100.000000, 900.000000, -20.000000)",
+            "",
+            "zoom",
+            "",
+        ])
+    else:
+        # Membrane-normal-based view with ectodomain-up check
+        center_d_mem = np.array(dz.membrane.membrane_center)
+        center_p_mem = np.array(pz.membrane.membrane_center) + translate_vec
+        view_center = (center_d_mem + center_p_mem) / 2.0
+        lines.extend([
+            "# --- Membrane-aligned view ---",
+            "deselect",
+            "set_view (\\",
+            "    {:.6f}, {:.6f}, {:.6f},\\".format(right[0], right[1], right[2]),
+            "    {:.6f}, {:.6f}, {:.6f},\\".format(up[0], up[1], up[2]),
+            "    {:.6f}, {:.6f}, {:.6f},\\".format(fwd[0], fwd[1], fwd[2]),
+            "    0.000000, 0.000000, -400.000000,\\",
+            "    {:.2f}, {:.2f}, {:.2f},\\".format(
+                view_center[0], view_center[1], view_center[2]),
+            "    100.000000, 900.000000, -20.000000)",
+            "",
+            "# Ensure ectodomain faces UP",
+            "python",
+            "from pymol import cmd",
+            "v = cmd.get_view()",
+            "com = cmd.centerofmass('visible')",
+            "mcx, mcy, mcz = {:.2f}, {:.2f}, {:.2f}".format(
+                view_center[0], view_center[1], view_center[2]),
+            "dx = com[0] - mcx",
+            "dy = com[1] - mcy",
+            "dz2 = com[2] - mcz",
+            "sy_com = v[3]*dx + v[4]*dy + v[5]*dz2",
+            "if sy_com < 0:",
+            "    cmd.turn('x', 180)",
+            "python end",
+            "",
+            "zoom",
+            "",
+        ])
 
     with open(pml_path, "w") as f:
         f.write("\n".join(lines) + "\n")
