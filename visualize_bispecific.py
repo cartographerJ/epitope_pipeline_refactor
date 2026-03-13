@@ -135,57 +135,65 @@ def plot_bispecific_summary(pair_results, output_path):
                        for pr in pair_results]
     dual_valid = [pr.both_valid for pr in pair_results]
 
-    fig, axes = plt.subplots(1, 3, figsize=(max(4 * n_pairs, 8), 5))
-    fig.suptitle("Bispecific Pair Summary", fontsize=16, fontweight="bold")
+    # Vertical layout: 3 rows, 1 column — narrow horizontal bars for slides
+    row_h = max(0.22 * n_pairs, 1.5)
+    fig, axes = plt.subplots(3, 1, figsize=(2.5, row_h * 3 + 1.0))
+    fig.suptitle("Bispecific Pair Summary", fontsize=7, fontweight="bold")
 
-    x = np.arange(n_pairs)
-    bar_width = 0.6
+    y = np.arange(n_pairs)
+    bar_height = 0.55
 
     # Panel 1: Final pair score
     ax1 = axes[0]
-    bars1 = ax1.bar(x, final_scores, bar_width, color=PALETTE["teal"], alpha=0.8)
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(pair_labels, fontsize=11, rotation=30, ha="right")
-    ax1.set_ylabel("Final Pair Score", fontsize=12)
-    ax1.set_title("Pair Score", fontsize=13)
-    ax1.set_ylim(0, 1.0)
+    bars1 = ax1.barh(y, final_scores, bar_height, color=PALETTE["teal"], alpha=0.8)
+    ax1.set_yticks(y)
+    ax1.set_yticklabels(pair_labels, fontsize=5)
+    ax1.set_xlabel("Final Pair Score", fontsize=6)
+    ax1.set_title("Pair Score", fontsize=6.5)
+    ax1.set_xlim(0, 1.15)
+    ax1.tick_params(axis="x", labelsize=5)
+    ax1.invert_yaxis()
     for i, (bar, val) in enumerate(zip(bars1, final_scores)):
         label = "{:.3f}".format(val)
         if dual_valid[i]:
             label += " *"
-        ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                 label, ha="center", va="bottom", fontsize=11)
+        ax1.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2,
+                 label, ha="left", va="center", fontsize=4.5)
 
     # Panel 2: Best distal score
     ax2 = axes[1]
-    bars2 = ax2.bar(x, distal_scores, bar_width, color=PALETTE["green"], alpha=0.8)
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(pair_labels, fontsize=11, rotation=30, ha="right")
-    ax2.set_ylabel("Composite Score", fontsize=12)
-    ax2.set_title("Best Distal Score", fontsize=13)
-    ax2.set_ylim(0, 1.0)
+    bars2 = ax2.barh(y, distal_scores, bar_height, color=PALETTE["green"], alpha=0.8)
+    ax2.set_yticks(y)
+    ax2.set_yticklabels(pair_labels, fontsize=5)
+    ax2.set_xlabel("Composite Score", fontsize=6)
+    ax2.set_title("Best Distal Score", fontsize=6.5)
+    ax2.set_xlim(0, 1.15)
+    ax2.tick_params(axis="x", labelsize=5)
+    ax2.invert_yaxis()
     for bar, val in zip(bars2, distal_scores):
         if val > 0:
-            ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                     "{:.3f}".format(val), ha="center", va="bottom", fontsize=11)
+            ax2.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2,
+                     "{:.3f}".format(val), ha="left", va="center", fontsize=4.5)
 
     # Panel 3: Best proximal score
     ax3 = axes[2]
-    bars3 = ax3.bar(x, proximal_scores, bar_width, color=PALETTE["blue"], alpha=0.8)
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(pair_labels, fontsize=11, rotation=30, ha="right")
-    ax3.set_ylabel("Composite Score", fontsize=12)
-    ax3.set_title("Best Proximal Score", fontsize=13)
-    ax3.set_ylim(0, 1.0)
+    bars3 = ax3.barh(y, proximal_scores, bar_height, color=PALETTE["blue"], alpha=0.8)
+    ax3.set_yticks(y)
+    ax3.set_yticklabels(pair_labels, fontsize=5)
+    ax3.set_xlabel("Composite Score", fontsize=6)
+    ax3.set_title("Best Proximal Score", fontsize=6.5)
+    ax3.set_xlim(0, 1.15)
+    ax3.tick_params(axis="x", labelsize=5)
+    ax3.invert_yaxis()
     for bar, val in zip(bars3, proximal_scores):
         if val > 0:
-            ax3.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                     "{:.3f}".format(val), ha="center", va="bottom", fontsize=11)
+            ax3.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2,
+                     "{:.3f}".format(val), ha="left", va="center", fontsize=4.5)
 
     # Footnote for dual-valid marker
     if any(dual_valid):
-        fig.text(0.5, 0.01, "* = dual-valid pair (both orientations work, 20% bonus applied)",
-                 ha="center", fontsize=10, fontstyle="italic", color="#666666")
+        fig.text(0.5, 0.003, "* = dual-valid (both orientations, 20% bonus)",
+                 ha="center", fontsize=4.5, fontstyle="italic", color="#666666")
 
     plt.tight_layout()
 
