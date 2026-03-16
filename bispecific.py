@@ -187,11 +187,14 @@ def run_bispecific(
         fh.close()
         return {"run_dir": str(run_dir), "pair_results": [], "zone_results": {}}
 
-    # Build lookup by both gene name and uniprot_id (case-insensitive gene)
+    # Build lookup by gene name, uniprot_id, and original input aliases
     target_lookup = {}
     for t in all_targets:
         target_lookup[t.uniprot_id] = t
         target_lookup[t.gene_name.upper()] = t
+    # Also map original input IDs (e.g., "HER2" alias → resolved ERBB2 target)
+    for orig_id, resolved in zip(unique_ids, all_targets):
+        target_lookup[orig_id.upper()] = resolved
 
     logger.info("Resolved %d unique targets", len(all_targets))
 

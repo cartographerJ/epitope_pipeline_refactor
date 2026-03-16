@@ -157,6 +157,31 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
                 residue_distances.get(_farthest_resnum, 0.0) if _farthest_resnum else 0.0,
             )
 
+    elif membrane.topology_type == "gpi_anchored" and extracellular_residues:
+        # GPI anchor (omega site) = max extracellular residue — analogous
+        # to TM/ecto boundary for single-pass proteins.
+        anchor_resnum = max(extracellular_residues)
+        if anchor_resnum in ca_coords:
+            anchor_ca = ca_coords[anchor_resnum]
+            for r in extracellular_residues:
+                if r in ca_coords:
+                    residue_distances[r] = float(np.linalg.norm(
+                        ca_coords[r] - anchor_ca
+                    ))
+            _anchor_resnum = anchor_resnum
+            _farthest_resnum = max(
+                (r for r in extracellular_residues if r in ca_coords),
+                key=lambda r: residue_distances[r],
+                default=None,
+            )
+            logger.info(
+                "  %s: Euclidean distances from GPI anchor (res %d), "
+                "farthest ECD residue %s at %.1fA",
+                target.gene_name, anchor_resnum,
+                _farthest_resnum,
+                residue_distances.get(_farthest_resnum, 0.0) if _farthest_resnum else 0.0,
+            )
+
     # Filter to EXTRACELLULAR residues meeting distance criteria
     if max_distance is not None:
         # Proximal mode: extracellular residues <= max_distance

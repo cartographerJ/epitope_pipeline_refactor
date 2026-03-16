@@ -153,6 +153,24 @@ def annotate_membrane(target, structure):
 
 
 # ---------------------------------------------------------------------------
+# Signal peptide extraction
+# ---------------------------------------------------------------------------
+
+def _extract_signal_peptide_end(features):
+    """
+    Extract signal peptide end residue from UniProt features.
+
+    The signal peptide is cleaved in the mature protein and is never
+    accessible on the cell surface. Returns 0 if no signal peptide found.
+    """
+    for feat in (features or []):
+        ftype = feat.get("type", "")
+        if ftype in ("Signal peptide", "Signal") and feat.get("end"):
+            return int(feat["end"])
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # TM segment extraction from UniProt features
 # ---------------------------------------------------------------------------
 
@@ -235,14 +253,6 @@ def _annotate_gpi_anchored(target, structure, gpi_residue):
     all_coords = np.array(all_coords)
     all_resnums = np.array(all_resnums)
 
-    # PCA: principal axis of the ectodomain = membrane normal
-    centroid = np.mean(all_coords, axis=0)
-    centered = all_coords - centroid
-    cov = np.cov(centered.T)
-    eigenvalues, eigenvectors = np.linalg.eigh(cov)
-    normal = eigenvectors[:, -1]  # largest eigenvalue = elongation axis
-    normal = normal / np.linalg.norm(normal)
-
     # Place membrane center at the C-terminal (membrane-proximal) end.
     # Find the most C-terminal resolved residues as the anchor region.
     max_resnum = np.max(all_resnums)
@@ -250,9 +260,12 @@ def _annotate_gpi_anchored(target, structure, gpi_residue):
     boundary_coords = all_coords[boundary_mask]
     boundary_center = np.mean(boundary_coords, axis=0)
 
-    # Orient normal: bulk of protein (centroid) on the positive side
-    if np.dot(centroid - boundary_center, normal) < 0:
-        normal = -normal
+    # Membrane normal = anchor region → protein centroid.
+    # This is robust for both elongated and globular GPI proteins
+    # (PCA elongation axis fails for compact/globular shapes like LY6G6D).
+    centroid = np.mean(all_coords, axis=0)
+    normal = centroid - boundary_center
+    normal = normal / np.linalg.norm(normal)
 
     # Extrapolate membrane center 15A beyond the boundary (GPI linker + lipid)
     GPI_EXTRAPOLATION_A = 15.0
@@ -263,15 +276,23 @@ def _annotate_gpi_anchored(target, structure, gpi_residue):
         GPI_EXTRAPOLATION_A,
     )
 
-    # Classify resolved residues as extracellular (only those N-terminal to GPI anchor)
-    # Residues C-terminal to the GPI anchor are cleaved off or buried in membrane
+    # Classify resolved residues.
+    # Signal peptide is cleaved in the mature protein — exclude from ectodomain.
+    # Residues C-terminal to the GPI anchor are cleaved off or membrane-embedded.
+    sp_end = _extract_signal_peptide_end(target.features)
+    if sp_end > 0:
+        logger.info("  Signal peptide 1-%d excluded from ectodomain", sp_end)
+
     residue_topo = {}
     for res in chain:
         res_id = res.get_id()
         if res_id[0] != " " or "CA" not in res:
             continue
         resnum = res_id[1]
-        if resnum <= gpi_residue:
+        if resnum <= sp_end:
+            # Signal peptide — cleaved, not on cell surface
+            residue_topo[resnum] = "intracellular"
+        elif resnum <= gpi_residue:
             residue_topo[resnum] = "extracellular"
         else:
             # Residues after GPI anchor are not accessible (cleaved or membrane-embedded)
@@ -657,6 +678,7 @@ def _classify_residues_from_plane(chain, normal, center, half_thickness, feature
     Classify every residue as extracellular, transmembrane, or intracellular.
 
     Priority order:
+      0. Signal peptide residues → always "intracellular" (cleaved, never on surface)
       1. TM residues from UniProt Transmembrane annotations → "transmembrane"
       2. UniProt Topological domain annotations → "extracellular" or "intracellular"
       3. Geometric distance from membrane plane (fallback for unannotated residues)
@@ -676,6 +698,11 @@ def _classify_residues_from_plane(chain, normal, center, half_thickness, feature
     Returns:
         Dict mapping residue number -> "extracellular" | "transmembrane" | "intracellular".
     """
+    # Signal peptide is cleaved in the mature protein — never on cell surface
+    sp_end = _extract_signal_peptide_end(features)
+    if sp_end > 0:
+        logger.info("  Signal peptide 1-%d excluded from ectodomain", sp_end)
+
     # Build set of TM residue numbers
     tm_residue_set = set()
     for start, end in tm_segments:
@@ -708,6 +735,11 @@ def _classify_residues_from_plane(chain, normal, center, half_thickness, feature
         resnum = res_id[1]
 
         if "CA" not in res:
+            continue
+
+        # Priority 0: signal peptide — cleaved, not on cell surface
+        if sp_end > 0 and resnum <= sp_end:
+            topology[resnum] = "intracellular"
             continue
 
         # Priority 1: explicit TM residues

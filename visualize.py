@@ -397,9 +397,9 @@ def _collect_domain_blocks(target):
             continue
         span = end - start + 1
 
-        # Skip topology (handled by brackets) and signal peptide
+        # Skip topology (handled by brackets) and transit peptide
         if ftype in ("Topological domain", "Intramembrane",
-                      "Transit peptide", "Signal peptide", "Signal"):
+                      "Transit peptide"):
             continue
         # Include Chain only for cleaved precursors
         if ftype == "Chain" and not include_chains:

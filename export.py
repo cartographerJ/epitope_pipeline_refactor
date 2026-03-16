@@ -678,7 +678,6 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
                         atom.set_coord(
                             _rotation_mat @ (pos - _rotation_origin))
 
-
     # --- Write PDB ---
     out_path = Path(run_dir) / pdb_subdir / "{}_epitope.pdb".format(
         target.gene_name.lower()
