@@ -257,15 +257,25 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     ax_patch.set_ylabel("Target\nEpitope", fontsize=11, rotation=0, ha="right", va="center")
     ax_patch.set_xlabel("Residue Position", fontsize=12)
 
-    # Patch labels (score + rank)
+    # Patch labels (score + rank) — stagger y positions to avoid overlap
     if scores:
-        for s in scores:
+        labeled = scores[:5]
+        n = len(labeled)
+        if n == 1:
+            y_levels = [0.5]
+        elif n == 2:
+            y_levels = [0.75, 0.25]
+        else:
+            # Evenly space n labels between 0.15 and 0.85
+            y_levels = [0.85 - i * 0.7 / (n - 1) for i in range(n)]
+        for i, s in enumerate(labeled):
+            y_pos = y_levels[i]
             center = np.mean(s.patch.residue_numbers)
-            label = "Patch {} \u2014 {:.0f} A\u00B2 | score {:.2f}".format(
+            label = "P{} {:.0f}A\u00B2 | {:.2f}".format(
                 s.rank, s.patch_area_a2, s.composite_score)
             ax_patch.text(
-                center, 0.5, label,
-                ha="center", va="center", fontsize=8.5, fontweight="bold",
+                center, y_pos, label,
+                ha="center", va="center", fontsize=8, fontweight="bold",
                 transform=ax_patch.get_xaxis_transform(),
             )
     else:

@@ -418,12 +418,15 @@ def _draw_zone_panel(fig, gs, zone_result, zone):
     if scores:
         # Limit labels to top 5 patches to avoid clutter
         labeled = scores[:5]
-        y_levels = [0.5] if len(labeled) == 1 else (
-            [0.75, 0.25] if len(labeled) == 2 else
-            [0.8, 0.5, 0.2]
-        )
+        n = len(labeled)
+        if n == 1:
+            y_levels = [0.5]
+        elif n == 2:
+            y_levels = [0.75, 0.25]
+        else:
+            y_levels = [0.85 - i * 0.7 / (n - 1) for i in range(n)]
         for i, s in enumerate(labeled):
-            y_pos = y_levels[i % len(y_levels)]
+            y_pos = y_levels[i]
             center = np.mean(s.patch.residue_numbers)
             label = "P{} {:.0f}A\u00B2 | {:.2f}".format(
                 s.rank, s.patch_area_a2, s.composite_score)
@@ -725,12 +728,15 @@ def _draw_horizontal_epitope(ax, zone_result):
 
         # Limit labels to top 5 patches to avoid clutter
         labeled = scores[:5]
-        y_levels = [0.5] if len(labeled) == 1 else (
-            [0.75, 0.25] if len(labeled) == 2 else
-            [0.8, 0.5, 0.2]
-        )
+        n = len(labeled)
+        if n == 1:
+            y_levels = [0.5]
+        elif n == 2:
+            y_levels = [0.75, 0.25]
+        else:
+            y_levels = [0.85 - i * 0.7 / (n - 1) for i in range(n)]
         for i, s in enumerate(labeled):
-            y_pos = y_levels[i % len(y_levels)]
+            y_pos = y_levels[i]
             center = np.mean(s.patch.residue_numbers)
             label = "P{} {:.0f}A\u00B2 | {:.2f}".format(
                 s.rank, s.patch_area_a2, s.composite_score)

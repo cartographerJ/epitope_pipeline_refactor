@@ -151,17 +151,21 @@ def run_bispecific(
 
     run_dir = config.RUNS_DIR / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
-    structures_dir = run_dir / "structures"
+    structures_dir = run_dir / ".structures"
     structures_dir.mkdir(exist_ok=True)
-    figures_dir = run_dir / "figures"
+    figures_dir = run_dir / "Figures"
     figures_dir.mkdir(exist_ok=True)
     zone_details_dir = figures_dir / "zone_details"
     zone_details_dir.mkdir(exist_ok=True)
-    pymol_dir = run_dir / "pymol"
+    pymol_dir = run_dir / "Structures"
     pymol_dir.mkdir(exist_ok=True)
 
     # Add file handler
-    log_path = run_dir / "log.txt"
+    supp_dir = run_dir / "Supplementary Files"
+    supp_dir.mkdir(exist_ok=True)
+    logs_dir = supp_dir / "Logs"
+    logs_dir.mkdir(exist_ok=True)
+    log_path = logs_dir / "log.txt"
     fh = logging.FileHandler(str(log_path))
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
@@ -391,7 +395,7 @@ def run_bispecific(
             for t in all_targets
         ],
     }
-    manifest_path = run_dir / "input_manifest.json"
+    manifest_path = supp_dir / "Logs" / "input_manifest.json"
     with open(str(manifest_path), "w") as f:
         json.dump(manifest, f, indent=2)
     logger.info("  Wrote input manifest: input_manifest.json")

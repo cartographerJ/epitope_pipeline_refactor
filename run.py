@@ -106,13 +106,17 @@ def run_pipeline(
 
     run_dir = config.RUNS_DIR / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
-    structures_dir = run_dir / "structures"
+    structures_dir = run_dir / ".structures"
     structures_dir.mkdir(exist_ok=True)
-    figures_dir = run_dir / "figures"
+    figures_dir = run_dir / "Figures"
     figures_dir.mkdir(exist_ok=True)
 
     # Add file handler for logging
-    log_path = run_dir / "log.txt"
+    supp_dir = run_dir / "Supplementary Files"
+    supp_dir.mkdir(exist_ok=True)
+    logs_dir = supp_dir / "Logs"
+    logs_dir.mkdir(exist_ok=True)
+    log_path = logs_dir / "log.txt"
     fh = logging.FileHandler(str(log_path))
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))

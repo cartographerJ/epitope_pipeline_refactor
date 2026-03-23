@@ -111,35 +111,35 @@ Each run creates a date-stamped directory under `runs/`:
 ```
 runs/2026-02-24_erbb2_egfr/
 ├── epitope_candidates.csv          # Main results table
-├── epitope_candidates.xlsx         # Color-formatted Excel workbook
-├── input_manifest.json             # Parameters for reproducibility
-├── log.txt                         # Full pipeline log
-├── annotated_pdbs/
-│   ├── erbb2_epitope.pdb           # B-factor = epitope score (PyMOL: spectrum b)
-│   └── egfr_epitope.pdb
-├── annotated_sequences/
-│   ├── erbb2_epitope.fasta         # FASTA with epitope annotations in header
-│   ├── erbb2_residue_table.csv     # Per-residue: topology, SASA, conservation, patch
-│   └── ...
-├── annotations/
-│   ├── erbb2_annotation.json       # Full intermediate results (JSON)
-│   └── ...
-├── blast/
-│   ├── erbb2_blast_hsps.csv        # All BLAST HSPs with identity, range, and call
-│   ├── erbb2_blast_specificity.csv # Per-residue: max off-target identity, top hit, call
-│   └── ...
-├── figures/
+├── Figures/
 │   ├── erbb2_epitope_map.png       # Linear epitope map
 │   ├── egfr_epitope_map.png
 │   └── scoring_summary.png         # Multi-target comparison
-└── structures/
-    ├── 1n8z.pdb                    # Downloaded/predicted structures
-    └── ...
+├── Structures/
+│   ├── erbb2_epitope.pml           # PyMOL session script (visible)
+│   ├── .erbb2_epitope.pdb          # Annotated PDB (hidden, loaded by PML)
+│   └── ...
+└── Supplementary Files/
+    ├── epitope_candidates.xlsx     # Color-formatted Excel workbook
+    ├── Annotated Sequences/
+    │   ├── erbb2_epitope.fasta     # FASTA with epitope annotations
+    │   ├── erbb2_residue_table.csv # Per-residue: topology, SASA, conservation
+    │   └── ...
+    ├── Annotations/
+    │   ├── erbb2_annotation.json   # Full intermediate results (JSON)
+    │   └── ...
+    ├── BLAST/
+    │   ├── erbb2_blast_hsps.csv    # All BLAST HSPs with identity, range, and call
+    │   ├── erbb2_blast_specificity.csv
+    │   └── ...
+    └── Logs/
+        ├── log.txt                 # Full pipeline log
+        └── input_manifest.json     # Parameters for reproducibility
 ```
 
 ### BLAST Detail Files
 
-The `blast/` directory contains two files per target for full transparency into the specificity analysis:
+The `Supplementary Files/BLAST/` directory contains two files per target for full transparency into the specificity analysis:
 
 **`{gene}_blast_hsps.csv`** — One row per BLAST HSP (high-scoring segment pair). Each row shows the off-target protein, alignment range, identity percentage, and call:
 - `non-specific` — identity >= 70%, covered residues marked non-specific
@@ -412,29 +412,28 @@ python -m epitope_pipeline.bispecific ERBB2:NECTIN4 --distal 80 --proximal 30
 
 ```
 runs/YYMMDD_HHMM_bispecific_erbb2_nectin/
-├── bispecific_pairs.csv               # Pair scores, orientations, component scores
-├── bispecific_pairs.xlsx              # Color-formatted pair scores
-├── input_manifest.json
-├── log.txt
-├── blast/                             # BLAST detail files (per unique target)
-│   ├── ERBB2_blast_hsps.csv
-│   ├── ERBB2_blast_specificity.csv
-│   └── ...
-├── figures/
-│   ├── bispecific_combined_*.png      # Side-by-side orientation comparison (3 tracks per target)
-│   ├── bispecific_*_distal__*.png     # Stacked dual-panel 6-track maps (both orientations)
+├── Figures/
+│   ├── bispecific_combined_*.png      # Side-by-side orientation comparison
+│   ├── bispecific_*_distal__*.png     # Stacked dual-panel 6-track maps
 │   ├── bispecific_pair_summary.png    # Bar chart comparing pair scores
 │   └── zone_details/                  # Per-zone deep-dive maps
 │       ├── erbb2_distal_epitope_map.png
-│       └── ...                        # 4 zone-specific 6-track single-target maps
-├── pymol/                             # All 3D artifacts
-│   ├── *_distal__*_proximal.pml       # Dual PML for each orientation (both always generated)
-│   │                                  #   with shared membrane bilayer CGO
-│   └── zone_sessions/                 # Per-zone deep-dive PDB + PML pairs
-│       ├── erbb2_distal_epitope.pdb
-│       ├── erbb2_distal_epitope.pml
 │       └── ...
-└── structures/
+├── Structures/
+│   ├── *_distal__*_proximal.pml       # Dual PML scripts (shared membrane CGO)
+│   └── zone_sessions/                 # Per-zone PML + hidden PDB pairs
+│       ├── erbb2_distal_epitope.pml
+│       ├── .erbb2_distal_epitope.pdb  # Hidden — loaded by PML
+│       └── ...
+└── Supplementary Files/
+    ├── bispecific_pairs.xlsx           # Color-formatted pair scores
+    ├── BLAST/                         # Per unique target
+    │   ├── ERBB2_blast_hsps.csv
+    │   ├── ERBB2_blast_specificity.csv
+    │   └── ...
+    └── Logs/
+        ├── log.txt
+        └── input_manifest.json
 ```
 
 ### Dual PML Alignment

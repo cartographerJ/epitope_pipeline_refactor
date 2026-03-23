@@ -35,7 +35,7 @@ def export_bispecific_all(run_dir, pair_results, zone_results,
         membranes: Dict {uid: MembraneAnnotation}.
     """
     run_dir = Path(run_dir)
-    pymol_dir = run_dir / "pymol"
+    pymol_dir = run_dir / "Structures"
     pymol_dir.mkdir(exist_ok=True)
     zone_sessions_dir = pymol_dir / "zone_sessions"
     zone_sessions_dir.mkdir(exist_ok=True)
@@ -62,7 +62,7 @@ def export_bispecific_all(run_dir, pair_results, zone_results,
         if uid in exported_blast:
             continue
         if zr.specificity_result:
-            export_blast_details(run_dir / "blast", zr.target, zr.specificity_result)
+            export_blast_details(run_dir / "Supplementary Files" / "BLAST", zr.target, zr.specificity_result)
             exported_blast.add(uid)
 
     # 5. Dual PML scripts (one per orientation) → pymol/
@@ -80,8 +80,8 @@ def export_bispecific_all(run_dir, pair_results, zone_results,
 # ---------------------------------------------------------------------------
 
 def export_bispecific_csv(run_dir, pair_results):
-    """Write bispecific_pairs.csv."""
-    csv_path = Path(run_dir) / "bispecific_pairs.csv"
+    """Write bispecific_pairs.csv (hidden)."""
+    csv_path = Path(run_dir) / ".bispecific_pairs.csv"
     rows = []
 
     for pr in pair_results:
@@ -146,7 +146,9 @@ def export_bispecific_xlsx(run_dir, pair_results):
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    xlsx_path = Path(run_dir) / "bispecific_pairs.xlsx"
+    supp_dir = Path(run_dir) / "Supplementary Files"
+    supp_dir.mkdir(exist_ok=True)
+    xlsx_path = supp_dir / "bispecific_pairs.xlsx"
     wb = Workbook()
 
     # Styles
@@ -299,7 +301,7 @@ def export_zone_annotated_pdb(run_dir, zone_result):
             surface_analysis=zone_result.surface_analysis,
             conservation_result=zone_result.conservation_result,
             scores=zone_result.scores,
-            pdb_subdir="pymol/zone_sessions",
+            pdb_subdir="Structures/zone_sessions",
         )
     finally:
         # Restore original name
@@ -316,7 +318,7 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
     Write a dual-target PyMOL script with both structures side-by-side.
     """
     run_dir = Path(run_dir)
-    pml_dir = run_dir / "pymol"
+    pml_dir = run_dir / "Structures"
     pml_dir.mkdir(parents=True, exist_ok=True)
 
     dz = orientation.distal_zone
@@ -324,8 +326,12 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
     distal_gene = dz.target.gene_name.lower()
     proximal_gene = pz.target.gene_name.lower()
 
-    distal_pdb = "{}_distal_epitope".format(distal_gene)
-    proximal_pdb = "{}_proximal_epitope".format(proximal_gene)
+    # PyMOL object names — short gene names for clean panel display
+    distal_pdb = dz.target.gene_name
+    proximal_pdb = pz.target.gene_name
+    # File names on disk (dot-prefixed, hidden)
+    distal_pdb_file = "{}_distal_epitope".format(distal_gene)
+    proximal_pdb_file = "{}_proximal_epitope".format(proximal_gene)
 
     pml_path = pml_dir / "{}.pml".format(orientation.label.lower())
 
@@ -358,18 +364,6 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
     # Determine chains
     distal_chain = dz.structure.chain_id
     proximal_chain = pz.structure.chain_id
-
-    # Cytoplasmic residues to hide
-    distal_cyto = set()
-    proximal_cyto = set()
-    if dz.membrane:
-        for resnum, topo in dz.membrane.residue_topology.items():
-            if topo == "intracellular":
-                distal_cyto.add(resnum)
-    if pz.membrane:
-        for resnum, topo in pz.membrane.residue_topology.items():
-            if topo == "intracellular":
-                proximal_cyto.add(resnum)
 
     gap = DUAL_PML_GAP_A
 
@@ -441,8 +435,8 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
         "set_color carto_purple,     [0.157, 0.082, 0.298]",
         "",
         "# --- Load both structures ---",
-        "load zone_sessions/{}.pdb, {}".format(distal_pdb, distal_pdb),
-        "load zone_sessions/{}.pdb, {}".format(proximal_pdb, proximal_pdb),
+        "load zone_sessions/.{}.pdb, {}".format(distal_pdb_file, distal_pdb),
+        "load zone_sessions/.{}.pdb, {}".format(proximal_pdb_file, proximal_pdb),
         "",
         "# --- Translate proximal target for side-by-side view ---",
         "translate [{:.2f}, {:.2f}, {:.2f}], {}".format(
@@ -459,64 +453,217 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
         "",
     ]
 
-    # Hide cytoplasmic for both
-    if distal_cyto:
-        lines.append("# --- Hide cytoplasmic: {} ---".format(dz.target.gene_name))
-        lines.append("select _distal_cyto, {} and chain {} and resi {}".format(
-            distal_pdb, distal_chain, resi_str(distal_cyto)))
-        lines.append("hide cartoon, _distal_cyto")
-        lines.append("disable _distal_cyto")
-        lines.append("")
+    # --- Per-target topology handling, filter selections, and patches ---
+    # Helper: generate all selections for one zone (mirrors _write_pymol_script logic)
+    def _zone_lines(zone, pdb_obj, ch, role, patches_dict):
+        """Generate PML lines for topology + filter tiers + patches for one zone."""
+        zlines = []
+        gene = zone.target.gene_name
+        # Short suffix for selection uniqueness (_D or _P) — group name provides full context
+        sx = "_D" if role == "Distal" else "_P"
+        prefix = "{}_{}".format(gene, role)  # for group names
 
-    if proximal_cyto:
-        lines.append("# --- Hide cytoplasmic: {} ---".format(pz.target.gene_name))
-        lines.append("select _proximal_cyto, {} and chain {} and resi {}".format(
-            proximal_pdb, proximal_chain, resi_str(proximal_cyto)))
-        lines.append("hide cartoon, _proximal_cyto")
-        lines.append("disable _proximal_cyto")
-        lines.append("")
+        # --- Topology handling (multi-pass vs single-pass/GPI) ---
+        is_multipass = (zone.membrane and
+                        zone.membrane.topology_type == "multi_pass")
+        if is_multipass:
+            zlines.append("# --- Multi-pass TM: {} — full structure with topology coloring ---".format(gene))
+            zlines.append("set cartoon_transparency, 0.0, {}".format(pdb_obj))
+            zlines.append("")
 
-    # Distal epitope patches
-    lines.append("# =============================================")
-    lines.append("# DISTAL TARGET: {} (>= {}A)".format(
-        dz.target.gene_name,
-        dz.spatial_filter.min_distance_threshold if dz.spatial_filter else "?"))
-    lines.append("# =============================================")
-    lines.append("")
+            tm_residues = set()
+            for seg_start, seg_end in zone.membrane.tm_segments:
+                for r in range(seg_start, seg_end + 1):
+                    tm_residues.add(r)
+            if tm_residues:
+                zlines.append("select TM_Helices{}, {} and chain {} and resi {}".format(
+                    sx, pdb_obj, ch, resi_str(tm_residues)))
+                zlines.append("color carto_purple, TM_Helices{}".format(sx))
+                zlines.append("")
 
-    for pid, resnums in distal_patches.items():
-        sel_name = "Distal_Patch_{}".format(pid)
-        lines.append("select {}, {} and chain {} and resi {}".format(
-            sel_name, distal_pdb, distal_chain, resi_str(resnums)))
-        lines.append("color carto_green, {}".format(sel_name))
-        lines.append("show surface, {}".format(sel_name))
-        lines.append("set transparency, 0.3, {}".format(sel_name))
-        lines.append("set cartoon_transparency, 0.0, {}".format(sel_name))
-        lines.append("")
+            ec_residues = set()
+            ic_residues = set()
+            for resnum, topo in zone.membrane.residue_topology.items():
+                if topo == "extracellular":
+                    ec_residues.add(resnum)
+                elif topo == "intracellular":
+                    ic_residues.add(resnum)
+            if ec_residues:
+                zlines.append("select ECD_Loops{}, {} and chain {} and resi {}".format(
+                    sx, pdb_obj, ch, resi_str(ec_residues)))
+                zlines.append("color carto_teal, ECD_Loops{}".format(sx))
+                zlines.append("")
+            if ic_residues:
+                zlines.append("select ICD_Loops{}, {} and chain {} and resi {}".format(
+                    sx, pdb_obj, ch, resi_str(ic_residues)))
+                zlines.append("color carto_palegreen, ICD_Loops{}".format(sx))
+                zlines.append("disable ICD_Loops{}".format(sx))
+                zlines.append("")
+        else:
+            # Single-pass / GPI: hide cytoplasmic
+            cyto = set()
+            if zone.membrane:
+                for resnum, topo in zone.membrane.residue_topology.items():
+                    if topo == "intracellular":
+                        cyto.add(resnum)
+            if cyto:
+                zlines.append("# --- Hide cytoplasmic: {} ---".format(gene))
+                zlines.append("select _cyto{}, {} and chain {} and resi {}".format(
+                    sx, pdb_obj, ch, resi_str(cyto)))
+                zlines.append("hide cartoon, _cyto{}".format(sx))
+                zlines.append("disable _cyto{}".format(sx))
+                zlines.append("")
 
-    # Proximal epitope patches
-    lines.append("# =============================================")
-    lines.append("# PROXIMAL TARGET: {} (<= {}A)".format(
-        pz.target.gene_name,
-        pz.spatial_filter.max_distance_threshold if pz.spatial_filter else "?"))
-    lines.append("# =============================================")
-    lines.append("")
+        # --- Build filter tier sets (mirrors _write_pymol_script) ---
+        patch_set = set()
+        for s in zone.scores:
+            for resnum in s.patch.residue_numbers:
+                patch_set.add(resnum)
 
-    for pid, resnums in proximal_patches.items():
-        sel_name = "Proximal_Patch_{}".format(pid)
-        lines.append("select {}, {} and chain {} and resi {}".format(
-            sel_name, proximal_pdb, proximal_chain, resi_str(resnums)))
-        lines.append("color carto_green, {}".format(sel_name))
-        lines.append("show surface, {}".format(sel_name))
-        lines.append("set transparency, 0.3, {}".format(sel_name))
-        lines.append("set cartoon_transparency, 0.0, {}".format(sel_name))
-        lines.append("")
+        dist_qualified = set()
+        if zone.spatial_filter:
+            dist_qualified = set(zone.spatial_filter.qualifying_residues)
+
+        surf_exposed = set()
+        if zone.surface_analysis:
+            surf_exposed = set(zone.surface_analysis.exposed_residues)
+
+        cyno_conserved = set()
+        if zone.conservation_result:
+            for resnum, is_conserved in zone.conservation_result.residue_conservation.items():
+                if is_conserved is True:
+                    cyno_conserved.add(resnum)
+
+        dist_thresh = zone.spatial_filter.min_distance_threshold if zone.spatial_filter else 0
+
+        conserved_surf = (cyno_conserved & surf_exposed) - patch_set
+        surf_only = surf_exposed - cyno_conserved - patch_set
+        dist_only = dist_qualified - surf_exposed - patch_set
+
+        all_ec = set()
+        if zone.membrane:
+            for resnum, topo in zone.membrane.residue_topology.items():
+                if topo == "extracellular":
+                    all_ec.add(resnum)
+        ec_near = all_ec - dist_qualified - patch_set
+
+        # --- Epitope patches → grouped under "{prefix}_Epitopes" ---
+        zone_label = ">= {}A".format(int(dist_thresh)) if role == "Distal" else "<= {}A".format(
+            int(zone.spatial_filter.max_distance_threshold) if zone.spatial_filter and zone.spatial_filter.max_distance_threshold else "?")
+        zlines.append("# =============================================")
+        zlines.append("# {} TARGET: {} ({})".format(role.upper(), gene, zone_label))
+        zlines.append("# =============================================")
+        zlines.append("")
+
+        patch_names = []
+        for pid, resnums in patches_dict.items():
+            sel_name = "Patch_{}{}".format(pid, sx)
+            patch_names.append(sel_name)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                sel_name, pdb_obj, ch, resi_str(resnums)))
+            zlines.append("color carto_green, {}".format(sel_name))
+            zlines.append("show surface, {}".format(sel_name))
+            zlines.append("set transparency, 0.3, {}".format(sel_name))
+            zlines.append("set cartoon_transparency, 0.0, {}".format(sel_name))
+            zlines.append("")
+
+        if patch_set:
+            combined_name = "Combined{}".format(sx)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                combined_name, pdb_obj, ch, resi_str(patch_set)))
+            patch_names.append(combined_name)
+            zlines.append("")
+
+        epi_group = "Epitopes{}".format(sx)
+        if patch_names:
+            zlines.append("group {}, {}".format(epi_group, " ".join(patch_names)))
+            zlines.append("group {}, close".format(epi_group))
+            zlines.append("")
+
+        # --- Filter tiers → grouped under "Filters" (closed, but clickable) ---
+        filter_names = []
+
+        if ec_near:
+            sel = "EC_Near_Membrane{}".format(sx)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                sel, pdb_obj, ch, resi_str(ec_near)))
+            filter_names.append(sel)
+            zlines.append("")
+
+        if dist_only:
+            sel = "Distant_Buried{}".format(sx)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                sel, pdb_obj, ch, resi_str(dist_only)))
+            filter_names.append(sel)
+            zlines.append("")
+
+        if surf_only:
+            sel = "Exposed_Not_Conserved{}".format(sx)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                sel, pdb_obj, ch, resi_str(surf_only)))
+            filter_names.append(sel)
+            zlines.append("")
+
+        if conserved_surf:
+            sel = "Conserved_Not_Patched{}".format(sx)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                sel, pdb_obj, ch, resi_str(conserved_surf)))
+            filter_names.append(sel)
+            zlines.append("")
+
+        all_dist_pass = dist_qualified | patch_set
+        all_surf_pass = (surf_exposed & dist_qualified) | patch_set
+        all_cons_pass = (cyno_conserved & surf_exposed & dist_qualified) | patch_set
+
+        if all_dist_pass:
+            sel = "Cumul_Distance_Pass{}".format(sx)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                sel, pdb_obj, ch, resi_str(all_dist_pass)))
+            filter_names.append(sel)
+            zlines.append("")
+        if all_surf_pass:
+            sel = "Cumul_Surface_Pass{}".format(sx)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                sel, pdb_obj, ch, resi_str(all_surf_pass)))
+            filter_names.append(sel)
+            zlines.append("")
+        if all_cons_pass:
+            sel = "Cumul_Conservation_Pass{}".format(sx)
+            zlines.append("select {}, {} and chain {} and resi {}".format(
+                sel, pdb_obj, ch, resi_str(all_cons_pass)))
+            filter_names.append(sel)
+            zlines.append("")
+
+        filt_group = "Filters{}".format(sx)
+        if filter_names:
+            zlines.append("group {}, {}".format(filt_group, " ".join(filter_names)))
+            zlines.append("group {}, close".format(filt_group))
+            zlines.append("")
+
+        # Top-level group: gene_Role containing PDB object + epitopes + filters
+        top_group = "{}_{}".format(gene, role)
+        sub_items = [pdb_obj]  # include the structure object
+        if patch_names:
+            sub_items.append(epi_group)
+        if filter_names:
+            sub_items.append(filt_group)
+        zlines.append("group {}, {}".format(top_group, " ".join(sub_items)))
+        zlines.append("group {}, close".format(top_group))
+        zlines.append("")
+
+        return zlines
+
+    # Generate selections for distal target
+    lines.extend(_zone_lines(dz, distal_pdb, distal_chain, "Distal", distal_patches))
+
+    # Generate selections for proximal target
+    lines.extend(_zone_lines(pz, proximal_pdb, proximal_chain, "Proximal", proximal_patches))
 
     # Shared membrane bilayer CGO spanning both structures
-    pdb_dir = run_dir / "pymol" / "zone_sessions"
+    pdb_dir = run_dir / "Structures" / "zone_sessions"
     if dz.membrane and pz.membrane:
-        distal_pdb_path = str(pdb_dir / "{}.pdb".format(distal_pdb))
-        proximal_pdb_path = str(pdb_dir / "{}.pdb".format(proximal_pdb))
+        distal_pdb_path = str(pdb_dir / ".{}.pdb".format(distal_pdb_file))
+        proximal_pdb_path = str(pdb_dir / ".{}.pdb".format(proximal_pdb_file))
         lines.extend(generate_shared_membrane_cgo_pml(
             membrane_a=dz.membrane, pdb_path_a=distal_pdb_path, chain_a=distal_chain,
             membrane_b=pz.membrane, pdb_path_b=proximal_pdb_path, chain_b=proximal_chain,
@@ -525,14 +672,14 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
             center_override=cgo_center,
         ))
     elif dz.membrane:
-        d_pdb_path = str(pdb_dir / "{}.pdb".format(distal_pdb))
+        d_pdb_path = str(pdb_dir / ".{}.pdb".format(distal_pdb_file))
         lines.extend(generate_membrane_cgo_pml(
             dz.membrane, d_pdb_path, distal_chain,
             normal_override=cgo_normal,
             center_override=cgo_center,
         ))
     elif pz.membrane:
-        p_pdb_path = str(pdb_dir / "{}.pdb".format(proximal_pdb))
+        p_pdb_path = str(pdb_dir / ".{}.pdb".format(proximal_pdb_file))
         lines.extend(generate_membrane_cgo_pml(
             pz.membrane, p_pdb_path, proximal_chain,
             translate_vec=translate_vec,
@@ -600,6 +747,13 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
             "zoom",
             "",
         ])
+
+    # Background settings (match single-target)
+    lines.extend([
+        "set ray_opaque_background, off",
+        "bg_color black",
+        "",
+    ])
 
     with open(pml_path, "w") as f:
         f.write("\n".join(lines) + "\n")

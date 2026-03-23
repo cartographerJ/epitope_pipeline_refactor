@@ -99,15 +99,17 @@ def export_all(
     """
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "annotated_pdbs").mkdir(exist_ok=True)
-    (run_dir / "annotated_sequences").mkdir(exist_ok=True)
-    (run_dir / "annotations").mkdir(exist_ok=True)
+    (run_dir / "Structures").mkdir(exist_ok=True)
+    supp_dir = run_dir / "Supplementary Files"
+    supp_dir.mkdir(exist_ok=True)
+    (supp_dir / "Annotated Sequences").mkdir(exist_ok=True)
+    (supp_dir / "Annotations").mkdir(exist_ok=True)
 
     # 1. Main results CSV
     export_results_csv(run_dir, targets, epitope_scores, target_metrics)
 
-    # 2. Excel workbook
-    export_results_xlsx(run_dir, targets, epitope_scores, target_metrics,
+    # 2. Excel workbook → Supplementary Files/
+    export_results_xlsx(supp_dir, targets, epitope_scores, target_metrics,
                         membranes, conservation_results)
 
     # 3. Annotated PDBs
@@ -122,11 +124,11 @@ def export_all(
                 epitope_scores.get(uid, []),
             )
 
-    # 4. Annotated sequences (FASTA + per-residue CSV)
+    # 4. Annotated sequences → Supplementary Files/
     for target in targets:
         uid = target.uniprot_id
         export_annotated_sequences(
-            run_dir, target,
+            supp_dir, target,
             membranes.get(uid),
             spatial_filters.get(uid),
             surface_analyses.get(uid),
@@ -135,17 +137,17 @@ def export_all(
             epitope_scores.get(uid, []),
         )
 
-    # 5. BLAST detail files
+    # 5. BLAST detail files → Supplementary Files/
     for target in targets:
         uid = target.uniprot_id
         if specificity_results.get(uid):
-            export_blast_details(run_dir / "blast", target, specificity_results[uid])
+            export_blast_details(supp_dir / "BLAST", target, specificity_results[uid])
 
-    # 6. JSON annotations (full intermediate data)
+    # 6. JSON annotations → Supplementary Files/
     for target in targets:
         uid = target.uniprot_id
         export_annotation_json(
-            run_dir, target,
+            supp_dir, target,
             structures.get(uid),
             membranes.get(uid),
             spatial_filters.get(uid),
@@ -495,7 +497,7 @@ def export_results_xlsx(run_dir, targets, epitope_scores, target_metrics,
 def export_annotated_pdb(run_dir, target, structure, membrane,
                          spatial_filter, surface_analysis,
                          conservation_result, scores,
-                         pdb_subdir="annotated_pdbs"):
+                         pdb_subdir="Structures"):
     """
     Write a richly annotated PDB with per-criteria B-factor tiers.
 
@@ -678,8 +680,8 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
                         atom.set_coord(
                             _rotation_mat @ (pos - _rotation_origin))
 
-    # --- Write PDB ---
-    out_path = Path(run_dir) / pdb_subdir / "{}_epitope.pdb".format(
+    # --- Write PDB (dot-prefixed to hide from file browsers) ---
+    out_path = Path(run_dir) / pdb_subdir / ".{}_epitope.pdb".format(
         target.gene_name.lower()
     )
     io = PDBIO()
@@ -727,7 +729,7 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
         "REMARK 999 ---- PYMOL QUICK SELECTIONS ----",
         "REMARK 999",
         "REMARK 999   # Load and orient",
-        "REMARK 999   load {}_epitope.pdb".format(target.gene_name.lower()),
+        "REMARK 999   load .{}_epitope.pdb".format(target.gene_name.lower()),
         "REMARK 999",
         "REMARK 999   # Select by criteria tier",
         "REMARK 999   select target_chain, chain {}".format(structure.chain_id),
@@ -1200,7 +1202,7 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
                          dist_qualified, surf_exposed, cyno_conserved,
                          patch_scores, membrane_ref_residues,
                          residue_distances, scores,
-                         pdb_subdir="annotated_pdbs",
+                         pdb_subdir="Structures",
                          pdb_rotated=False):
     """
     Write a .pml PyMOL script that creates named, clickable selections
@@ -1273,7 +1275,7 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
         "# Colors: Cartography palette",
         "",
         "# --- Load structure ---",
-        "load {}_epitope.pdb, {}".format(gene, pdb_name),
+        "load .{}_epitope.pdb, {}".format(gene, pdb_name),
         "",
         "# --- Cartography palette ---",
         "set_color carto_gray,       [0.827, 0.827, 0.827]",
@@ -1348,125 +1350,92 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
                 lines.append("disable _cytoplasmic")
                 lines.append("")
 
-    lines.extend([
-        "# =============================================",
-        "# PIPELINE FILTER SELECTIONS (clickable)",
-        "# Each tier is exclusive — residues appear in",
-        "# exactly one selection based on the highest",
-        "# criterion they passed.",
-        "# =============================================",
-        "",
-    ])
-
-    # EC residues too close to membrane (didn't pass distance cutoff)
-    if ec_near:
-        lines.append("# Ectodomain below {:.0f}A cutoff — {} residues".format(
-            dist_thresh, len(ec_near)))
-        lines.append("select EC_Near_Membrane, {} and chain {} and resi {}".format(
-            pdb_name, ch, resi_str(ec_near)))
-        lines.append("color carto_palegreen, EC_Near_Membrane")
-        lines.append("disable EC_Near_Membrane")
-        lines.append("")
-
-    # Passed distance filter but buried (not surface-exposed)
-    if dist_only:
-        lines.append("# Distant (>={:.0f}A) but buried — {} residues".format(
-            dist_thresh, len(dist_only)))
-        lines.append("select Distant_Buried, {} and chain {} and resi {}".format(
-            pdb_name, ch, resi_str(dist_only)))
-        lines.append("color carto_blue, Distant_Buried")
-        lines.append("disable Distant_Buried")
-        lines.append("")
-
-    # Surface exposed but not cyno-conserved
-    if surf_only:
-        lines.append("# Surface exposed but not cyno-conserved — {} residues".format(
-            len(surf_only)))
-        lines.append("select Exposed_Not_Conserved, {} and chain {} and resi {}".format(
-            pdb_name, ch, resi_str(surf_only)))
-        lines.append("color carto_teal, Exposed_Not_Conserved")
-        lines.append("disable Exposed_Not_Conserved")
-        lines.append("")
-
-    # Cyno-conserved + surface but didn't cluster into a VHH-sized patch
-    if conserved_surf:
-        lines.append("# Cyno conserved but not in a VHH-sized patch — {} residues".format(
-            len(conserved_surf)))
-        lines.append("select Conserved_Not_Patched, {} and chain {} and resi {}".format(
-            pdb_name, ch, resi_str(conserved_surf)))
-        lines.append("color carto_purple, Conserved_Not_Patched")
-        lines.append("disable Conserved_Not_Patched")
-        lines.append("")
-
-    # Epitope patch(es) — one selection per patch
+    # =============================================
+    # EPITOPE PATCHES — grouped under "Epitopes"
+    # =============================================
+    patch_names = []
     for s in scores:
         resnums = set(s.patch.residue_numbers) - ref_set
-        lines.append("# EPITOPE PATCH {} — score={:.3f}, {} residues, {:.0f} A2, cyno={:.0f}%".format(
+        sel = "Patch_{}".format(s.patch_id)
+        patch_names.append(sel)
+        lines.append("# PATCH {} — score={:.3f}, {} residues, {:.0f} A2, cyno={:.0f}%".format(
             s.patch_id, s.composite_score, len(s.patch.residue_numbers),
             s.patch.total_sasa_a2, s.cyno_identity * 100))
-        lines.append("select Epitope_Patch_{}, {} and chain {} and resi {}".format(
-            s.patch_id, pdb_name, ch, resi_str(resnums)))
-        lines.append("color carto_green, Epitope_Patch_{}".format(s.patch_id))
-        lines.append("show surface, Epitope_Patch_{}".format(s.patch_id))
+        lines.append("select {}, {} and chain {} and resi {}".format(
+            sel, pdb_name, ch, resi_str(resnums)))
+        lines.append("color carto_green, {}".format(sel))
+        lines.append("show surface, {}".format(sel))
+        lines.append("set transparency, 0.3, {}".format(sel))
+        lines.append("set cartoon_transparency, 0.0, {}".format(sel))
         lines.append("")
 
-    # Union of all epitope patches
     if patch_set:
         all_patch = patch_set - ref_set
-        lines.append("# Union of all epitope patches — {} residues".format(len(all_patch)))
-        lines.append("select Epitope_Combined, {} and chain {} and resi {}".format(
+        lines.append("select Combined, {} and chain {} and resi {}".format(
             pdb_name, ch, resi_str(all_patch)))
+        patch_names.append("Combined")
         lines.append("")
 
-    # 3 most membrane-proximal residues (measurement origin)
-    if membrane_ref_residues:
-        ref_resnums = sorted(membrane_ref_residues)
-        ref_dists = [residue_distances.get(r, 0.0) for r in ref_resnums]
-        lines.append("# Membrane reference — 3 most proximal residues")
-        for r, d in zip(ref_resnums, ref_dists):
-            lines.append("#   Residue {}: {:.1f}A from membrane".format(r, d))
-        lines.append("select Membrane_Reference, {} and chain {} and resi {}".format(
-            pdb_name, ch, resi_str(membrane_ref_residues)))
-        lines.append("show spheres, Membrane_Reference")
-        lines.append("color magenta, Membrane_Reference")
-        lines.append("set sphere_scale, 0.8, Membrane_Reference")
+    if patch_names:
+        lines.append("group Epitopes, {}".format(" ".join(patch_names)))
+        lines.append("group Epitopes, close")
         lines.append("")
 
-    # Cumulative selections — each includes everything that passed
-    # that filter AND all higher tiers above it
-    lines.append("# =============================================")
-    lines.append("# CUMULATIVE SELECTIONS (inclusive)")
-    lines.append("# Everything passing filter X and above")
-    lines.append("# =============================================")
-    lines.append("")
+    # =============================================
+    # FILTER TIERS — grouped under "Filters" (closed, but clickable)
+    # =============================================
+    filter_names = []
+
+    if ec_near:
+        lines.append("select EC_Near_Membrane, {} and chain {} and resi {}".format(
+            pdb_name, ch, resi_str(ec_near)))
+        filter_names.append("EC_Near_Membrane")
+        lines.append("")
+
+    if dist_only:
+        lines.append("select Distant_Buried, {} and chain {} and resi {}".format(
+            pdb_name, ch, resi_str(dist_only)))
+        filter_names.append("Distant_Buried")
+        lines.append("")
+
+    if surf_only:
+        lines.append("select Exposed_Not_Conserved, {} and chain {} and resi {}".format(
+            pdb_name, ch, resi_str(surf_only)))
+        filter_names.append("Exposed_Not_Conserved")
+        lines.append("")
+
+    if conserved_surf:
+        lines.append("select Conserved_Not_Patched, {} and chain {} and resi {}".format(
+            pdb_name, ch, resi_str(conserved_surf)))
+        filter_names.append("Conserved_Not_Patched")
+        lines.append("")
 
     if all_dist_pass:
-        lines.append("# All residues >= {:.0f}A from membrane — {} residues".format(
-            dist_thresh, len(all_dist_pass)))
         lines.append("select Cumul_Distance_Pass, {} and chain {} and resi {}".format(
             pdb_name, ch, resi_str(all_dist_pass)))
-        lines.append("disable Cumul_Distance_Pass")
+        filter_names.append("Cumul_Distance_Pass")
         lines.append("")
 
     if all_surf_pass:
-        lines.append("# All surface-exposed + distance-qualified — {} residues".format(
-            len(all_surf_pass)))
         lines.append("select Cumul_Surface_Pass, {} and chain {} and resi {}".format(
             pdb_name, ch, resi_str(all_surf_pass)))
-        lines.append("disable Cumul_Surface_Pass")
+        filter_names.append("Cumul_Surface_Pass")
         lines.append("")
 
     if all_cons_pass:
-        lines.append("# All cyno-conserved + surface + distance — {} residues".format(
-            len(all_cons_pass)))
         lines.append("select Cumul_Conservation_Pass, {} and chain {} and resi {}".format(
             pdb_name, ch, resi_str(all_cons_pass)))
-        lines.append("disable Cumul_Conservation_Pass")
+        filter_names.append("Cumul_Conservation_Pass")
+        lines.append("")
+
+    if filter_names:
+        lines.append("group Filters, {}".format(" ".join(filter_names)))
+        lines.append("group Filters, close")
         lines.append("")
 
     # Membrane bilayer CGO disks
     if membrane:
-        pdb_file = Path(run_dir) / pdb_subdir / "{}_epitope.pdb".format(gene)
+        pdb_file = Path(run_dir) / pdb_subdir / ".{}_epitope.pdb".format(gene)
         if pdb_rotated:
             # PDB coordinates are rotated: ecto-axis = Y-up, anchor at origin.
             # Draw bilayer horizontally at Y = -half_thickness.
@@ -1530,7 +1499,7 @@ def export_annotated_sequences(run_dir, target, membrane, spatial_filter,
     """
     uid = target.uniprot_id
     gene = target.gene_name.lower()
-    seq_dir = Path(run_dir) / "annotated_sequences"
+    seq_dir = Path(run_dir) / "Annotated Sequences"
 
     # --- FASTA ---
     fasta_path = seq_dir / "{}_epitope.fasta".format(gene)
@@ -1629,7 +1598,7 @@ def export_annotation_json(run_dir, target, structure, membrane, spatial_filter,
     """
     Write full annotation JSON for programmatic reuse.
     """
-    json_path = Path(run_dir) / "annotations" / "{}_annotation.json".format(
+    json_path = Path(run_dir) / "Annotations" / "{}_annotation.json".format(
         target.gene_name.lower()
     )
 
