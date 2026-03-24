@@ -463,56 +463,7 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
         sx = "_D" if role == "Distal" else "_P"
         prefix = "{}_{}".format(gene, role)  # for group names
 
-        # --- Topology handling (multi-pass vs single-pass/GPI) ---
-        is_multipass = (zone.membrane and
-                        zone.membrane.topology_type == "multi_pass")
-        if is_multipass:
-            zlines.append("# --- Multi-pass TM: {} — full structure with topology coloring ---".format(gene))
-            zlines.append("set cartoon_transparency, 0.0, {}".format(pdb_obj))
-            zlines.append("")
-
-            tm_residues = set()
-            for seg_start, seg_end in zone.membrane.tm_segments:
-                for r in range(seg_start, seg_end + 1):
-                    tm_residues.add(r)
-            if tm_residues:
-                zlines.append("select TM_Helices{}, {} and chain {} and resi {}".format(
-                    sx, pdb_obj, ch, resi_str(tm_residues)))
-                zlines.append("color carto_purple, TM_Helices{}".format(sx))
-                zlines.append("")
-
-            ec_residues = set()
-            ic_residues = set()
-            for resnum, topo in zone.membrane.residue_topology.items():
-                if topo == "extracellular":
-                    ec_residues.add(resnum)
-                elif topo == "intracellular":
-                    ic_residues.add(resnum)
-            if ec_residues:
-                zlines.append("select ECD_Loops{}, {} and chain {} and resi {}".format(
-                    sx, pdb_obj, ch, resi_str(ec_residues)))
-                zlines.append("color carto_teal, ECD_Loops{}".format(sx))
-                zlines.append("")
-            if ic_residues:
-                zlines.append("select ICD_Loops{}, {} and chain {} and resi {}".format(
-                    sx, pdb_obj, ch, resi_str(ic_residues)))
-                zlines.append("color carto_palegreen, ICD_Loops{}".format(sx))
-                zlines.append("disable ICD_Loops{}".format(sx))
-                zlines.append("")
-        else:
-            # Single-pass / GPI: hide cytoplasmic
-            cyto = set()
-            if zone.membrane:
-                for resnum, topo in zone.membrane.residue_topology.items():
-                    if topo == "intracellular":
-                        cyto.add(resnum)
-            if cyto:
-                zlines.append("# --- Hide cytoplasmic: {} ---".format(gene))
-                zlines.append("select _cyto{}, {} and chain {} and resi {}".format(
-                    sx, pdb_obj, ch, resi_str(cyto)))
-                zlines.append("hide cartoon, _cyto{}".format(sx))
-                zlines.append("disable _cyto{}".format(sx))
-                zlines.append("")
+        # No topology coloring — white cartoon + green patches only
 
         # --- Build filter tier sets (mirrors _write_pymol_script) ---
         patch_set = set()

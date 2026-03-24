@@ -1298,57 +1298,7 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
     # For multi-pass proteins, show everything (TM bundle is integral to the structure).
     # For single-pass / GPI, hide only residues below the membrane plane using
     # spatial distance data (more reliable than topology classification alone).
-    if structure.source in ("alphafold_db", "tamarind_alphafold") and membrane:
-        is_multipass = membrane.topology_type == "multi_pass"
-        if is_multipass:
-            # Multi-pass: show everything, color by topology for clarity
-            lines.append("# --- Multi-pass TM: full structure with topology coloring ---")
-            lines.append("set cartoon_transparency, 0.0, {} and chain {}".format(pdb_name, ch))
-            lines.append("")
-
-            # TM helices in purple
-            tm_residues = set()
-            for seg_start, seg_end in membrane.tm_segments:
-                for r in range(seg_start, seg_end + 1):
-                    tm_residues.add(r)
-            if tm_residues:
-                lines.append("select TM_Helices, {} and chain {} and resi {}".format(
-                    pdb_name, ch, resi_str(tm_residues)))
-                lines.append("color carto_purple, TM_Helices")
-                lines.append("")
-
-            # Extracellular loops in teal
-            ec_residues = set()
-            ic_residues = set()
-            for resnum, topo in membrane.residue_topology.items():
-                if topo == "extracellular":
-                    ec_residues.add(resnum)
-                elif topo == "intracellular":
-                    ic_residues.add(resnum)
-            if ec_residues:
-                lines.append("select ECD_Loops, {} and chain {} and resi {}".format(
-                    pdb_name, ch, resi_str(ec_residues)))
-                lines.append("color carto_teal, ECD_Loops")
-                lines.append("")
-            if ic_residues:
-                lines.append("select ICD_Loops, {} and chain {} and resi {}".format(
-                    pdb_name, ch, resi_str(ic_residues)))
-                lines.append("color carto_palegreen, ICD_Loops")
-                lines.append("disable ICD_Loops")
-                lines.append("")
-        else:
-            # Hide cytoplasmic only — keep TM visible for structural context
-            cyto_residues = set()
-            for resnum, topo in membrane.residue_topology.items():
-                if topo == "intracellular":
-                    cyto_residues.add(resnum)
-            if cyto_residues:
-                lines.append("# --- Hide cytoplasmic (keep TM visible) ---")
-                lines.append("select _cytoplasmic, {} and chain {} and resi {}".format(
-                    pdb_name, ch, resi_str(cyto_residues)))
-                lines.append("hide cartoon, _cytoplasmic")
-                lines.append("disable _cytoplasmic")
-                lines.append("")
+    # No topology coloring — white cartoon + green patches only
 
     # =============================================
     # EPITOPE PATCHES — grouped under "Epitopes"

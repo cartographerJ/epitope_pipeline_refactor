@@ -26,7 +26,13 @@ results = run_pipeline(["ERBB2", "EGFR", "P04626"])
 # Isoform support (GENE.X notation or UniProt isoform IDs)
 results = run_pipeline(["CLDN18.2", "P56856-2"])  # Both formats supported
 
-# With custom thresholds
+# Proximal mode — find epitopes close to membrane
+results = run_pipeline(
+    ["KISS1R"],
+    max_distance_a=40.0,                # Epitopes within 40A of membrane
+)
+
+# Distal mode with custom thresholds
 results = run_pipeline(
     ["ERBB2"],
     min_distance_a=60.0,                # Override 80A default
@@ -162,7 +168,7 @@ The B-factor column in annotated PDBs encodes the epitope analysis:
 **PyMOL**: `spectrum b, blue_white_red`
 **ChimeraX**: `color bfactor palette cyan:white:green`
 
-Each annotated PDB comes with a companion `.pml` script for PyMOL with clickable named selections for each pipeline tier. Cytoplasmic residues are hidden; TM helices remain visible for structural context. For multi-pass TM proteins, the PML shows the full structure with topology-based coloring (TM helices in purple, ECD loops in teal).
+Each annotated PDB comes with a companion `.pml` script for PyMOL. The full structure is shown as white cartoon with green epitope patch surfaces (30% transparency). Selections are organized into collapsible groups: `Epitopes` (per-patch selections + combined) and `Filters` (pipeline tier selections, clickable but no default coloring). PDB files are dot-prefixed (hidden from file browsers) and loaded automatically by the PML script.
 
 ### Scoring Components
 

@@ -52,6 +52,7 @@ def run_pipeline(
     identifiers,
     run_name=None,
     min_distance_a=None,
+    max_distance_a=None,
     cyno_max_mismatches=None,
     specificity_threshold=None,
     folding_tool=None,
@@ -64,7 +65,10 @@ def run_pipeline(
     Args:
         identifiers: List of UniProt accession IDs or gene names.
         run_name: Optional custom name for the run directory.
-        min_distance_a: Override ectodomain distance threshold (default 150A).
+        min_distance_a: Override min ectodomain distance (default 80A, distal mode).
+        max_distance_a: Override max ectodomain distance (proximal mode).
+            When set, pipeline finds epitopes <= max_distance_a from membrane
+            instead of >= min_distance_a.
         cyno_max_mismatches: Override max cyno mismatches per 600A² (default 2).
         specificity_threshold: Override specificity threshold (default 0.95).
         folding_tool: Override Tamarind folding tool (default "alphafold").
@@ -203,9 +207,15 @@ def run_pipeline(
         # =================================================================
         # Step 4: Ectodomain spatial filter
         # =================================================================
-        logger.info("\nStep 4: Ectodomain distance filter (>= %.0fA)", config.ECTODOMAIN_MIN_DISTANCE_A)
-        spatial = filter_ectodomain(target, structure, membrane,
-                                     ca_coords=ca_coords)
+        if max_distance_a is not None:
+            logger.info("\nStep 4: Ectodomain distance filter (<= %.0fA, proximal)", max_distance_a)
+            spatial = filter_ectodomain(target, structure, membrane,
+                                         max_distance=max_distance_a,
+                                         ca_coords=ca_coords)
+        else:
+            logger.info("\nStep 4: Ectodomain distance filter (>= %.0fA)", config.ECTODOMAIN_MIN_DISTANCE_A)
+            spatial = filter_ectodomain(target, structure, membrane,
+                                         ca_coords=ca_coords)
         all_spatial[uid] = spatial
 
         # =================================================================
