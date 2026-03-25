@@ -551,3 +551,118 @@ def plot_scoring_summary(all_scores, target_metrics, targets, output_path):
     fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
     plt.close(fig)
     logger.info("  Wrote scoring summary: %s", output_path.name)
+
+
+# ======================================================================
+# BLAST off-target dot plot
+# ======================================================================
+
+def plot_blast_offtargets(target, specificity_result, output_path,
+                          max_proteins=25, identity_threshold=0.40):
+    """
+    Dot plot of BLAST off-target HSPs along the target sequence.
+
+    Y-axis = off-target protein names (sorted by max identity, descending).
+    X-axis = position along target sequence.
+    Each dot = one HSP, colored by identity (teal gradient).
+    Top hits (>=70% identity) highlighted with a red box.
+
+    Args:
+        target: TargetInfo.
+        specificity_result: SpecificityResult with full_blast_hits.
+        output_path: Path to save the figure.
+        max_proteins: Max number of off-target proteins to show.
+        identity_threshold: Min HSP identity to include (default 0.40).
+    """
+    if not specificity_result or not specificity_result.full_blast_hits:
+        return
+
+    hits = specificity_result.full_blast_hits
+    seq_len = target.sequence_length
+
+    # Filter by identity threshold and group by protein
+    protein_hsps = {}  # {gene_name: [hsp_dicts]}
+    for h in hits:
+        if h["identity"] < identity_threshold:
+            continue
+        # Extract gene name from title
+        # Local BLAST format: "sp|Q7RTY9|PRS41_HUMAN ..." -> "PRS41"
+        # Remote BLAST format: "ADAM33_HUMAN ..." -> "ADAM33"
+        title = h.get("title", "")
+        if "|" in title:
+            # sp|ACCESSION|GENE_SPECIES format
+            pipe_parts = title.split("|")
+            gene = pipe_parts[2].split("_")[0] if len(pipe_parts) >= 3 else pipe_parts[-1].split("_")[0]
+        else:
+            parts = title.split()
+            gene = parts[0].split("_")[0] if parts and "_" in parts[0] else h.get("accession", "?")
+        if gene not in protein_hsps:
+            protein_hsps[gene] = []
+        protein_hsps[gene].append(h)
+
+    if not protein_hsps:
+        return
+
+    # Sort proteins by max identity (descending), take top N
+    protein_max_id = {g: max(h["identity"] for h in hsps)
+                      for g, hsps in protein_hsps.items()}
+    sorted_proteins = sorted(protein_max_id, key=protein_max_id.get, reverse=True)
+    sorted_proteins = sorted_proteins[:max_proteins]
+
+    # Build plot data
+    y_labels = sorted_proteins
+    n_proteins = len(y_labels)
+    gene_to_y = {g: i for i, g in enumerate(reversed(y_labels))}
+
+    fig_height = max(4, 0.35 * n_proteins + 1.5)
+    fig, ax = plt.subplots(figsize=(12, fig_height))
+
+    # Identify non-specific threshold (>=70% identity)
+    nonspecific_genes = [g for g in sorted_proteins if protein_max_id[g] >= 0.70]
+
+    # Plot dots
+    xs, ys, colors = [], [], []
+    for gene in sorted_proteins:
+        y = gene_to_y[gene]
+        for h in protein_hsps[gene]:
+            # Plot dot at midpoint of HSP range
+            mid = (h["query_start"] + h["query_end"]) / 2.0
+            xs.append(mid)
+            ys.append(y)
+            colors.append(PALETTE["teal"])
+
+    ax.scatter(xs, ys, c=colors, s=30, alpha=0.7, edgecolors="none", zorder=3)
+
+    # Red box around non-specific hits
+    if nonspecific_genes:
+        n_nonspec = len(nonspecific_genes)
+        box_y_min = gene_to_y[nonspecific_genes[-1]] - 0.5
+        box_y_max = gene_to_y[nonspecific_genes[0]] + 0.5
+        from matplotlib.patches import Rectangle
+        rect = Rectangle(
+            (0, box_y_min), seq_len, box_y_max - box_y_min,
+            linewidth=2, edgecolor="red", facecolor="none", zorder=2,
+        )
+        ax.add_patch(rect)
+
+    # Styling
+    ax.set_xlim(0, seq_len)
+    ax.set_ylim(-0.5, n_proteins - 0.5)
+    ax.set_yticks(range(n_proteins))
+    ax.set_yticklabels(reversed(y_labels), fontsize=9)
+    ax.set_xlabel("Position", fontsize=12)
+    ax.set_title("Top {} off-targets: {}".format(
+        target.gene_name, target.gene_name), fontsize=13, fontweight="bold")
+    ax.grid(axis="y", alpha=0.3, linewidth=0.5)
+    ax.tick_params(axis="x", labelsize=10)
+
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+
+    plt.tight_layout()
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("  Wrote BLAST off-target plot: %s", output_path.name)

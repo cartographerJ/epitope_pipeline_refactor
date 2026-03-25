@@ -38,7 +38,7 @@ from epitope_pipeline.conservation import analyze_conservation, ConservationErro
 from epitope_pipeline.specificity import filter_specificity
 from epitope_pipeline.scoring import score_epitopes, compute_target_epitope_metric
 from epitope_pipeline.export import export_all
-from epitope_pipeline.visualize import plot_epitope_map, plot_scoring_summary
+from epitope_pipeline.visualize import plot_epitope_map, plot_scoring_summary, plot_blast_offtargets
 
 
 logger = logging.getLogger("epitope_pipeline")
@@ -54,6 +54,8 @@ def run_pipeline(
     min_distance_a=None,
     max_distance_a=None,
     cyno_max_mismatches=None,
+    cyno_mismatch_percent=None,
+    nonspecific_percent=None,
     specificity_threshold=None,
     folding_tool=None,
     force_experimental=False,
@@ -87,6 +89,10 @@ def run_pipeline(
         config.ECTODOMAIN_MIN_DISTANCE_A = min_distance_a
     if cyno_max_mismatches is not None:
         config.MAX_CYNO_MISMATCHES_PER_600A2 = cyno_max_mismatches
+    if cyno_mismatch_percent is not None:
+        config.MAX_CYNO_MISMATCH_PERCENT = cyno_mismatch_percent
+    if nonspecific_percent is not None:
+        config.MAX_NONSPECIFIC_PERCENT = nonspecific_percent
     if specificity_threshold is not None:
         config.SPECIFICITY_IDENTITY_THRESHOLD = specificity_threshold
     if folding_tool is not None:
@@ -376,6 +382,18 @@ def run_pipeline(
                 specificity_result=all_specificity.get(uid),
                 scores=all_scores.get(uid, []),
                 output_path=str(figures_dir / "{}_epitope_map.png".format(
+                    target.gene_name.lower()
+                )),
+            )
+
+    # BLAST off-target dot plots
+    for target in targets:
+        uid = target.uniprot_id
+        if all_specificity.get(uid):
+            plot_blast_offtargets(
+                target=target,
+                specificity_result=all_specificity[uid],
+                output_path=str(figures_dir / "{}_blast_offtargets.png".format(
                     target.gene_name.lower()
                 )),
             )

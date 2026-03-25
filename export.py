@@ -282,7 +282,7 @@ def export_results_csv(run_dir, targets, epitope_scores, target_metrics):
     """
     Write main results table: one row per epitope patch across all targets.
     """
-    csv_path = Path(run_dir) / "epitope_candidates.csv"
+    csv_path = Path(run_dir) / ".epitope_candidates.csv"
     rows = []
 
     for target in targets:
@@ -1616,7 +1616,9 @@ def export_manifest(run_dir, targets, parameters):
     """
     Write input manifest for reproducibility.
     """
-    manifest_path = Path(run_dir) / "input_manifest.json"
+    logs_dir = Path(run_dir) / "Supplementary Files" / "Logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = logs_dir / "input_manifest.json"
     data = {
         "pipeline": "epitope_pipeline",
         "version": "0.1.0",

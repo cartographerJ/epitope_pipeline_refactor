@@ -134,17 +134,17 @@ def analyze_conservation(target, surface_analysis, ca_coords=None):
             identity_fraction * 100, n_conserved, n_mismatches, mismatch_percent,
         )
 
-        # Whole-patch evaluation
-        passes, _ = evaluate_patch_conservation(patch, residue_conservation)
+        # Whole-patch evaluation (threshold scales with patch size)
+        passes, _, effective_thresh = evaluate_patch_conservation(patch, residue_conservation)
 
         if passes:
             conserved_patches.append(patch)
-            logger.info("      -> PASSED (%.1f%% mismatches < %.1f%% threshold)",
-                       mismatch_percent, config.MAX_CYNO_MISMATCH_PERCENT)
+            logger.info("      -> PASSED (%.1f%% mismatches <= %.1f%% threshold, %d residues)",
+                       mismatch_percent, effective_thresh, n_residues)
         else:
             rejected_patches.append((patch, identity_fraction))
-            logger.info("      -> REJECTED (%.1f%% mismatches > %.1f%% threshold)",
-                       mismatch_percent, config.MAX_CYNO_MISMATCH_PERCENT)
+            logger.info("      -> REJECTED (%.1f%% mismatches > %.1f%% threshold, %d residues)",
+                       mismatch_percent, effective_thresh, n_residues)
 
     logger.info(
         "  %s conservation: %d patches pass, %d rejected",
@@ -291,20 +291,31 @@ def evaluate_patch_conservation(patch, residue_conservation):
     """
     Evaluate a patch based on percentage of mismatched residues.
 
+    The threshold scales with patch size: larger patches tolerate a higher
+    mismatch percentage because the VHH only contacts ~20 residues within
+    the patch. Formula:
+
+        effective_threshold = min(base_threshold * sqrt(n_residues / 20), 30%)
+
+    A 20-residue patch uses the base threshold (default 15%). A 100-residue
+    patch gets ~34% → capped at 30%. This reflects the reality that
+    mismatches in a large patch can be avoided spatially.
+
     Args:
         patch: SurfacePatch object.
         residue_conservation: Dict {resnum: bool} — True=conserved, False=mismatch.
 
     Returns:
-        Tuple (passes, mismatch_percent):
+        Tuple (passes, mismatch_percent, effective_threshold):
             - passes: True if patch meets criteria.
             - mismatch_percent: Float percentage (0-100).
+            - effective_threshold: Size-adjusted threshold used (0-100).
     """
     from .config import MAX_CYNO_MISMATCH_PERCENT
 
     n_residues = len(patch.residue_numbers)
     if n_residues == 0:
-        return False, 100.0
+        return False, 100.0, 0.0
 
     n_conserved = sum(
         1 for r in patch.residue_numbers
@@ -313,9 +324,14 @@ def evaluate_patch_conservation(patch, residue_conservation):
     n_mismatches = n_residues - n_conserved
     mismatch_percent = (n_mismatches / n_residues) * 100.0
 
-    passes = (mismatch_percent <= MAX_CYNO_MISMATCH_PERCENT)
+    # Scale threshold by patch size: sqrt(n/20) with 30% ceiling
+    effective_threshold = min(
+        MAX_CYNO_MISMATCH_PERCENT * math.sqrt(n_residues / 20.0),
+        30.0,
+    )
+    passes = (mismatch_percent <= effective_threshold)
 
-    return passes, mismatch_percent
+    return passes, mismatch_percent, effective_threshold
 
 
 # ---------------------------------------------------------------------------

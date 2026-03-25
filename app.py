@@ -82,6 +82,20 @@ else:
         min_value=20, max_value=80, value=40, step=5,
     )
 
+st.sidebar.markdown("---")
+
+cyno_mismatch_pct = st.sidebar.slider(
+    "Max cyno mismatch %",
+    min_value=5, max_value=50, value=15, step=5,
+    help="Max % cyno mismatches to accept a patch (e.g., 15% = 3 mismatches in a 20-residue patch)",
+)
+
+nonspecific_pct = st.sidebar.slider(
+    "Max non-specific %",
+    min_value=5, max_value=50, value=15, step=5,
+    help="Max % non-specific residues to accept a patch (e.g., 15% = 3 non-specific in a 20-residue patch)",
+)
+
 with st.sidebar.expander("Advanced"):
     force_experimental = st.checkbox("Force experimental PDB", value=False)
 
@@ -138,6 +152,8 @@ if run_clicked:
                 results = run_pipeline(
                     identifiers,
                     max_distance_a=float(max_dist),
+                    cyno_mismatch_percent=float(cyno_mismatch_pct),
+                    nonspecific_percent=float(nonspecific_pct),
                     force_experimental=force_experimental,
                 )
             else:
@@ -146,6 +162,8 @@ if run_clicked:
                     pairs,
                     distal_min_distance_a=float(distal_min),
                     proximal_max_distance_a=float(proximal_max),
+                    cyno_mismatch_percent=float(cyno_mismatch_pct),
+                    nonspecific_percent=float(nonspecific_pct),
                     force_experimental=force_experimental,
                 )
 

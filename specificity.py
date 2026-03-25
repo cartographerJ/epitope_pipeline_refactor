@@ -230,14 +230,14 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
                 unscreened_patches.append(patch)
                 continue
 
-        # Whole-patch evaluation
-        passes, nonspecific_pct = evaluate_patch_specificity(patch, residue_specificity)
+        # Whole-patch evaluation (threshold scales with patch size)
+        passes, nonspecific_pct, effective_thresh = evaluate_patch_specificity(patch, residue_specificity)
 
         if passes:
             specific_patches.append(patch)
             logger.info(
-                "    Patch %d: PASSED (%.1f%% non-specific < %.1f%% threshold)",
-                patch.patch_id, nonspecific_pct, config.MAX_NONSPECIFIC_PERCENT,
+                "    Patch %d: PASSED (%.1f%% non-specific <= %.1f%% threshold, %d residues)",
+                patch.patch_id, nonspecific_pct, effective_thresh, len(patch.residue_numbers),
             )
         else:
             offending = _find_best_hit(patch_hits, patch.residue_numbers)
@@ -247,9 +247,9 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
                 offending["identity"],
             ))
             logger.info(
-                "    Patch %d: REJECTED (%.1f%% non-specific > %.1f%% threshold) — "
+                "    Patch %d: REJECTED (%.1f%% non-specific > %.1f%% threshold, %d residues) — "
                 "%.1f%% identity with %s",
-                patch.patch_id, nonspecific_pct, config.MAX_NONSPECIFIC_PERCENT,
+                patch.patch_id, nonspecific_pct, effective_thresh, len(patch.residue_numbers),
                 offending["identity"] * 100, offending["accession"],
             )
 
@@ -843,16 +843,23 @@ def evaluate_patch_specificity(patch, residue_specificity):
     """
     Evaluate a patch based on percentage of non-specific residues.
 
+    The threshold scales with patch size (same logic as conservation):
+
+        effective_threshold = min(base_threshold * sqrt(n_residues / 20), 30%)
+
     Args:
         patch: SurfacePatch object.
         residue_specificity: Dict {resnum: bool or None} —
             True=specific, False=non-specific, None=not assessed.
 
     Returns:
-        Tuple (passes, nonspecific_percent):
+        Tuple (passes, nonspecific_percent, effective_threshold):
             - passes: True if patch meets criteria.
             - nonspecific_percent: Float percentage (0-100).
+            - effective_threshold: Size-adjusted threshold used (0-100).
     """
+    import math
+
     patch_set = set(patch.residue_numbers)
     n_total = len(patch_set)
 
@@ -862,7 +869,7 @@ def evaluate_patch_specificity(patch, residue_specificity):
 
     if n_assessed == 0:
         # No BLAST data — pass by default
-        return True, 0.0
+        return True, 0.0, 0.0
 
     # Count non-specific residues
     n_nonspecific = sum(1 for r in patch_set
@@ -870,9 +877,14 @@ def evaluate_patch_specificity(patch, residue_specificity):
 
     nonspecific_percent = (n_nonspecific / n_total) * 100.0
 
-    passes = (nonspecific_percent <= config.MAX_NONSPECIFIC_PERCENT)
+    # Scale threshold by patch size: sqrt(n/20) with 30% ceiling
+    effective_threshold = min(
+        config.MAX_NONSPECIFIC_PERCENT * math.sqrt(n_total / 20.0),
+        30.0,
+    )
+    passes = (nonspecific_percent <= effective_threshold)
 
-    return passes, nonspecific_percent
+    return passes, nonspecific_percent, effective_threshold
 
 
 def merge_adjacent_patches(patches, distance_threshold_a=15.0):

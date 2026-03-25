@@ -33,7 +33,7 @@ from epitope_pipeline.conservation import (
 )
 from epitope_pipeline.specificity import filter_specificity
 from epitope_pipeline.scoring import score_epitopes, compute_target_epitope_metric
-from epitope_pipeline.visualize import plot_epitope_map
+from epitope_pipeline.visualize import plot_epitope_map, plot_blast_offtargets
 
 
 logger = logging.getLogger("epitope_pipeline")
@@ -426,6 +426,22 @@ def run_bispecific(
             )),
             title_suffix=zone_label,
         )
+
+    # BLAST off-target dot plots (one per unique target)
+    plotted_blast = set()
+    for key, zr in zone_results.items():
+        uid = key[0]
+        if uid in plotted_blast:
+            continue
+        if zr.specificity_result:
+            plot_blast_offtargets(
+                target=zr.target,
+                specificity_result=zr.specificity_result,
+                output_path=str(figures_dir / "{}_blast_offtargets.png".format(
+                    zr.target.gene_name.lower()
+                )),
+            )
+            plotted_blast.add(uid)
 
     # =====================================================================
     # Visualization: bispecific maps
