@@ -111,7 +111,7 @@ def resolve_targets(identifiers):
         target = _parse_uniprot_entry(entry)
 
         # Resolve cynomolgus monkey ortholog
-        cyno_id, cyno_seq = _resolve_cyno_ortholog(target.gene_name)
+        cyno_id, cyno_seq = _resolve_cyno_ortholog(target.gene_name, target.sequence_length)
         target.cyno_uniprot_id = cyno_id
         target.cyno_sequence = cyno_seq
         if cyno_id:
@@ -240,15 +240,18 @@ def _search_uniprot_by_gene(gene_name):
     return accession
 
 
-def _resolve_cyno_ortholog(gene_name):
+def _resolve_cyno_ortholog(gene_name, human_seq_length=None):
     """
     Find the cynomolgus macaque ortholog for a given gene.
 
     Searches UniProt for the gene in Macaca fascicularis (taxid 9541).
     Prefers reviewed entries but falls back to unreviewed (TrEMBL).
+    When multiple entries exist, picks the one closest in sequence
+    length to the human protein (avoids fragments).
 
     Args:
         gene_name: Human gene symbol (e.g. "ERBB2").
+        human_seq_length: Length of the human protein (for best-match selection).
 
     Returns:
         Tuple of (accession, sequence) or (None, None) if not found.
@@ -292,7 +295,16 @@ def _resolve_cyno_ortholog(gene_name):
 
             results = data.get("results", [])
             if results:
-                entry = results[0]
+                # Pick entry closest in length to human protein
+                if human_seq_length and len(results) > 1:
+                    entry = min(
+                        results,
+                        key=lambda e: abs(
+                            e.get("sequence", {}).get("length", 0) - human_seq_length
+                        ),
+                    )
+                else:
+                    entry = results[0]
                 accession = entry["primaryAccession"]
                 sequence = entry.get("sequence", {}).get("value", "")
 
