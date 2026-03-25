@@ -701,7 +701,7 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
 
     # Background settings (match single-target)
     lines.extend([
-        "set ray_opaque_background, off",
+        "set ray_opaque_background, on",
         "bg_color black",
         "",
     ])
