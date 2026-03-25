@@ -136,12 +136,15 @@ def run_pipeline(
 
     # Record parameters used
     parameters = {
+        "mode": "proximal (max_distance_a={})".format(max_distance_a) if max_distance_a else "distal (min_distance_a={})".format(config.ECTODOMAIN_MIN_DISTANCE_A),
         "min_distance_a": config.ECTODOMAIN_MIN_DISTANCE_A,
-        "cyno_max_mismatches_per_600a2": config.MAX_CYNO_MISMATCHES_PER_600A2,
-        "specificity_threshold": config.SPECIFICITY_IDENTITY_THRESHOLD,
+        "max_distance_a": max_distance_a,
+        "cyno_mismatch_percent_base": config.MAX_CYNO_MISMATCH_PERCENT,
+        "cyno_mismatch_scaling": "min(base% * sqrt(n_residues/20), 30%)",
+        "nonspecific_percent_base": config.MAX_NONSPECIFIC_PERCENT,
+        "nonspecific_scaling": "min(base% * sqrt(n_residues/20), 30%)",
+        "specificity_identity_threshold": config.SPECIFICITY_IDENTITY_THRESHOLD,
         "folding_tool": config.FOLDING_TOOL,
-        "resolution_threshold_a": config.RESOLUTION_THRESHOLD_A,
-        "allowed_methods": config.ALLOWED_METHODS,
         "vhh_footprint_min_a2": config.VHH_FOOTPRINT_MIN_A2,
         "patch_clustering_distance_a": config.PATCH_CLUSTERING_DISTANCE_A,
         "surface_exposure_threshold": config.SURFACE_EXPOSURE_THRESHOLD,

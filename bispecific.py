@@ -362,8 +362,11 @@ def run_bispecific(
         "mode": "bispecific",
         "distal_min_distance_a": distal_dist,
         "proximal_max_distance_a": proximal_dist,
-        "cyno_max_mismatches_per_600a2": config.MAX_CYNO_MISMATCHES_PER_600A2,
-        "specificity_threshold": config.SPECIFICITY_IDENTITY_THRESHOLD,
+        "cyno_mismatch_percent_base": config.MAX_CYNO_MISMATCH_PERCENT,
+        "cyno_mismatch_scaling": "min(base% * sqrt(n_residues/20), 30%)",
+        "nonspecific_percent_base": config.MAX_NONSPECIFIC_PERCENT,
+        "nonspecific_scaling": "min(base% * sqrt(n_residues/20), 30%)",
+        "specificity_identity_threshold": config.SPECIFICITY_IDENTITY_THRESHOLD,
         "vhh_footprint_min_a2": config.VHH_FOOTPRINT_MIN_A2,
         "flexibility_bonus": config.FLEXIBILITY_BONUS,
     }
