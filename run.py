@@ -393,10 +393,12 @@ def run_pipeline(
     for target in targets:
         uid = target.uniprot_id
         if all_specificity.get(uid):
+            blast_fig_dir = figures_dir / "BLAST"
+            blast_fig_dir.mkdir(exist_ok=True)
             plot_blast_offtargets(
                 target=target,
                 specificity_result=all_specificity[uid],
-                output_path=str(figures_dir / "{}_blast_offtargets.png".format(
+                output_path=str(blast_fig_dir / "{}_blast_offtargets.png".format(
                     target.gene_name.lower()
                 )),
             )

@@ -150,19 +150,25 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         ax_dom.add_patch(rect)
         center = (start + end) / 2.0
         text_color = "white" if fcolor in (COLOR_TRANSMEMBRANE, PALETTE["blue"]) else "black"
+
+        # Estimate how many characters fit based on block fraction of figure width
+        # A 12-inch-wide figure at ~100 dpi with fontsize 7 bold fits ~1 char per 6px
+        # Figure is ~12 inches, so ~1200 points. Each char at fontsize 7 bold ≈ 5pt.
+        fig_width_pts = 12 * 72  # 864 points
+        block_pts = (span / seq_len) * fig_width_pts
+        char_width = 4.5 if fcolor == COLOR_TRANSMEMBRANE else 5.0  # TM labels are short
+        max_chars = max(0, int(block_pts / char_width) - 1)
+
+        if max_chars < 2:
+            continue  # too small for any label
         fontsize = 7 if span < 80 else 9
-        txt = ax_dom.text(
-            center, block_y + block_h / 2, label,
+        display_label = label[:max_chars] + ".." if len(label) > max_chars else label
+
+        ax_dom.text(
+            center, block_y + block_h / 2, display_label,
             ha="center", va="center", fontsize=fontsize, fontweight="bold",
             color=text_color, zorder=4, clip_on=True,
         )
-        # Right-only clip: let text overflow left but clip at domain right edge
-        right_clip = plt.Rectangle(
-            (center - 5000, block_y), 5000 + (end - center + 0.5), block_h,
-            transform=ax_dom.transData, visible=False,
-        )
-        ax_dom.add_patch(right_clip)
-        txt.set_clip_path(right_clip)
 
     # ==================================================================
     # Track 2: Distance from membrane (abs value, ECD teal, non-ECD gray)
@@ -585,12 +591,15 @@ def plot_blast_offtargets(target, specificity_result, output_path,
     for h in hits:
         if h["identity"] < identity_threshold:
             continue
-        # Extract gene name from title
-        # Local BLAST format: "sp|Q7RTY9|PRS41_HUMAN ..." -> "PRS41"
-        # Remote BLAST format: "ADAM33_HUMAN ..." -> "ADAM33"
+        # Extract conventional gene name from BLAST title
+        # Title format: "sp|Q9BYE2|TMPSD_HUMAN ... GN=TMPRSS13 ..."
+        # Prefer GN= field (conventional gene name), fall back to UniProt short name
         title = h.get("title", "")
-        if "|" in title:
-            # sp|ACCESSION|GENE_SPECIES format
+        import re as _re
+        gn_match = _re.search(r'GN=(\S+)', title)
+        if gn_match:
+            gene = gn_match.group(1)
+        elif "|" in title:
             pipe_parts = title.split("|")
             gene = pipe_parts[2].split("_")[0] if len(pipe_parts) >= 3 else pipe_parts[-1].split("_")[0]
         else:
@@ -633,7 +642,7 @@ def plot_blast_offtargets(target, specificity_result, output_path,
 
     ax.scatter(xs, ys, c=colors, s=30, alpha=0.7, edgecolors="none", zorder=3)
 
-    # Red box around non-specific hits
+    # Red box around non-specific hits (>=70% identity)
     if nonspecific_genes:
         n_nonspec = len(nonspecific_genes)
         box_y_min = gene_to_y[nonspecific_genes[-1]] - 0.5
@@ -644,15 +653,20 @@ def plot_blast_offtargets(target, specificity_result, output_path,
             linewidth=2, edgecolor="red", facecolor="none", zorder=2,
         )
         ax.add_patch(rect)
+        ax.text(
+            seq_len, box_y_max - 0.1,
+            " \u226570% identity ({})".format(n_nonspec),
+            fontsize=8, color="red", va="top", ha="left",
+        )
 
     # Styling
-    ax.set_xlim(0, seq_len)
+    ax.set_xlim(0, seq_len * 1.15)  # extra space for label
     ax.set_ylim(-0.5, n_proteins - 0.5)
     ax.set_yticks(range(n_proteins))
     ax.set_yticklabels(reversed(y_labels), fontsize=9)
     ax.set_xlabel("Position", fontsize=12)
-    ax.set_title("Top {} off-targets: {}".format(
-        target.gene_name, target.gene_name), fontsize=13, fontweight="bold")
+    ax.set_title("{} \u2014 BLAST Off-Targets".format(
+        target.gene_name), fontsize=13, fontweight="bold")
     ax.grid(axis="y", alpha=0.3, linewidth=0.5)
     ax.tick_params(axis="x", labelsize=10)
 

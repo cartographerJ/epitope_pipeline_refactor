@@ -437,10 +437,12 @@ def run_bispecific(
         if uid in plotted_blast:
             continue
         if zr.specificity_result:
+            blast_fig_dir = figures_dir / "BLAST"
+            blast_fig_dir.mkdir(exist_ok=True)
             plot_blast_offtargets(
                 target=zr.target,
                 specificity_result=zr.specificity_result,
-                output_path=str(figures_dir / "{}_blast_offtargets.png".format(
+                output_path=str(blast_fig_dir / "{}_blast_offtargets.png".format(
                     zr.target.gene_name.lower()
                 )),
             )

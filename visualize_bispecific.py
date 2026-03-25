@@ -323,18 +323,19 @@ def _draw_zone_panel(fig, gs, zone_result, zone):
         ax_dom.add_patch(rect)
         center = (start + end) / 2.0
         text_color = "white" if fcolor in (COLOR_TRANSMEMBRANE, PALETTE["blue"]) else "black"
+        fig_width_pts = 12 * 72
+        block_pts = (span / seq_len) * fig_width_pts
+        char_width = 4.5 if fcolor == COLOR_TRANSMEMBRANE else 5.0
+        max_chars = max(0, int(block_pts / char_width) - 1)
+        if max_chars < 2:
+            continue
         fontsize = 7 if span < 80 else 9
-        txt = ax_dom.text(
-            center, block_y + block_h / 2, label,
+        display_label = label[:max_chars] + ".." if len(label) > max_chars else label
+        ax_dom.text(
+            center, block_y + block_h / 2, display_label,
             ha="center", va="center", fontsize=fontsize, fontweight="bold",
             color=text_color, zorder=4, clip_on=True,
         )
-        right_clip = plt.Rectangle(
-            (center - 5000, block_y), 5000 + (end - center + 0.5), block_h,
-            transform=ax_dom.transData, visible=False,
-        )
-        ax_dom.add_patch(right_clip)
-        txt.set_clip_path(right_clip)
 
     # ==================================================================
     # Track 2: Distance
@@ -635,19 +636,26 @@ def _draw_horizontal_domains(ax, zone_result):
         center = (start + end) / 2.0
         text_color = ("white" if fcolor in (COLOR_TRANSMEMBRANE, PALETTE["blue"])
                       else "black")
+        fig_width_pts = 8 * 72  # combined figure is narrower (~8 inches per column)
+        block_pts = (span / seq_len) * fig_width_pts
+        char_width = 4.5 if fcolor == COLOR_TRANSMEMBRANE else 5.0
+        max_chars = max(0, int(block_pts / char_width) - 1)
+        if max_chars < 2:
+            continue
         fontsize = 7 if span < 80 else 9
-        if span >= 20:
+        display_label = label[:max_chars] + ".." if len(label) > max_chars else label
+        if True:
             txt = ax.text(
-                center, block_y + block_h / 2, label,
+                center, block_y + block_h / 2, display_label,
                 ha="center", va="center", fontsize=fontsize, fontweight="bold",
                 color=text_color, zorder=4, clip_on=True,
             )
-            right_clip = plt.Rectangle(
-                (center - 5000, block_y), 5000 + (end - center + 0.5), block_h,
+            clip_rect = plt.Rectangle(
+                (start - 0.5, block_y), span, block_h,
                 transform=ax.transData, visible=False,
             )
-            ax.add_patch(right_clip)
-            txt.set_clip_path(right_clip)
+            ax.add_patch(clip_rect)
+            txt.set_clip_path(clip_rect)
 
     ax.tick_params(labelsize=9)
     for spine in ax.spines.values():
