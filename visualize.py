@@ -111,7 +111,7 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     # ---- Create 6-track figure ----
     fig, axes = plt.subplots(
         6, 1,
-        figsize=(max(18, seq_len * 0.025), 11),
+        figsize=(18, 11),
         gridspec_kw={"height_ratios": [0.7, 1.4, 1.4, 0.4, 0.4, 0.5]},
         sharex=True,
     )
@@ -154,7 +154,7 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         # Estimate how many characters fit based on block fraction of figure width
         # A 12-inch-wide figure at ~100 dpi with fontsize 7 bold fits ~1 char per 6px
         # Figure is ~12 inches, so ~1200 points. Each char at fontsize 7 bold ≈ 5pt.
-        fig_width_pts = 12 * 72  # 864 points
+        fig_width_pts = 18 * 72  # 1296 points
         block_pts = (span / seq_len) * fig_width_pts
         char_width = 4.5 if fcolor == COLOR_TRANSMEMBRANE else 5.0  # TM labels are short
         max_chars = max(0, int(block_pts / char_width) - 1)
