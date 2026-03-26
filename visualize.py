@@ -360,6 +360,7 @@ def _draw_topology_brackets(ax, target, membrane, seq_len):
         topo_spans.append(("Extracellular", sp_end, seq_len))
 
     for label, start, end in topo_spans:
+        span = end - start + 1
         # Horizontal line
         ax.plot([start, end], [bracket_y, bracket_y],
                 color=color, linewidth=1.0, clip_on=False, zorder=5)
@@ -368,11 +369,16 @@ def _draw_topology_brackets(ax, target, membrane, seq_len):
                 color=color, linewidth=1.0, clip_on=False, zorder=5)
         ax.plot([end, end], [bracket_y, bracket_y - tick_h],
                 color=color, linewidth=1.0, clip_on=False, zorder=5)
-        # Centered label above
-        center = (start + end) / 2.0
-        ax.text(center, label_y, label,
-                ha="center", va="bottom", fontsize=9, color=color,
-                fontweight="bold", zorder=5)
+        # Centered label above — skip if span too narrow for text
+        fig_width_pts = 18 * 72
+        block_pts = (span / seq_len) * fig_width_pts
+        max_chars = max(0, int(block_pts / 6.0) - 1)
+        if max_chars >= 3:
+            display_label = label[:max_chars] + ".." if len(label) > max_chars else label
+            center = (start + end) / 2.0
+            ax.text(center, label_y, display_label,
+                    ha="center", va="bottom", fontsize=9, color=color,
+                    fontweight="bold", zorder=5)
 
 
 def _collect_domain_blocks(target):
