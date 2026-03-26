@@ -846,7 +846,7 @@ def generate_membrane_cgo_pml(membrane, pdb_path, chain_id,
         radial_dist = np.linalg.norm(v_in_plane)
         if radial_dist > max_radial:
             max_radial = radial_dist
-    radius = max_radial + 15.0
+    radius = (max_radial + 15.0) * 1.3
 
     # TM exclusion zone: project TM residues onto membrane plane
     tm_plane_pos = []
@@ -858,7 +858,7 @@ def generate_membrane_cgo_pml(membrane, pdb_path, chain_id,
 
     # Generate random lipid positions on the membrane plane (fixed seed)
     rng = np.random.RandomState(42)
-    n_target = 350
+    n_target = 600
     lipid_positions = []  # (in-plane x, in-plane y)
     attempts = 0
     while len(lipid_positions) < n_target and attempts < n_target * 5:
@@ -1063,7 +1063,7 @@ def generate_shared_membrane_cgo_pml(membrane_a, pdb_path_a, chain_a,
         if radial_dist > max_radial:
             max_radial = radial_dist
 
-    radius = max_radial + 15.0
+    radius = (max_radial + 15.0) * 1.3
 
     # TM exclusion zones from BOTH structures
     tm_plane_pos = []
