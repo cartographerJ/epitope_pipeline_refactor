@@ -448,8 +448,8 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
         "show cartoon, {}".format(proximal_pdb),
         "color white, {}".format(distal_pdb),
         "color white, {}".format(proximal_pdb),
-        "set cartoon_transparency, 0.3, {}".format(distal_pdb),
-        "set cartoon_transparency, 0.3, {}".format(proximal_pdb),
+        "set cartoon_transparency, 0.15, {}".format(distal_pdb),
+        "set cartoon_transparency, 0.15, {}".format(proximal_pdb),
         "",
     ]
 
@@ -699,10 +699,18 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
             "",
         ])
 
-    # Background settings (match single-target)
+    # Background + ray trace settings (match single-target)
     lines.extend([
+        "# --- Ray trace settings ---",
         "set ray_opaque_background, on",
         "bg_color black",
+        "set ray_trace_mode, 1",
+        "set ray_shadows, 1",
+        "set antialias, 2",
+        "set ray_trace_gain, 0.1",
+        "set light_count, 2",
+        "set specular, 0.4",
+        "set ambient, 0.35",
         "",
     ])
 
