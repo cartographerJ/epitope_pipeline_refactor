@@ -111,17 +111,24 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
     # Re-zero distances to the membrane surface (top of bilayer).
     # raw distance is from membrane center; subtract half_thickness to get
     # distance from the bilayer surface.
-    # Signal peptide residues are cleaved — zero them out so they don't
-    # produce artificial spikes from AlphaFold's arbitrary SP placement.
+    # Signal peptide and GPI anchor signal residues are cleaved — remove
+    # them from distances so they don't produce artificial spikes.
     sp_end = getattr(membrane, '_sp_end', 0) or 0
     if sp_end == 0 and hasattr(target, 'features'):
         from epitope_pipeline.membrane import _extract_signal_peptide_end
         sp_end = _extract_signal_peptide_end(target.features)
+    # GPI anchor: residues after omega site are cleaved
+    gpi_start = None
+    if membrane.topology_type == "gpi_anchored" and hasattr(target, 'features'):
+        for feat in (target.features or []):
+            if feat.get("type") == "Lipidation" and feat.get("end"):
+                gpi_start = int(feat["end"]) + 1
+                break
     extracellular_set = set(extracellular_residues)
     surface_offset = membrane.membrane_half_thickness
-    for r in residue_distances:
-        if r <= sp_end:
-            residue_distances[r] = 0.0
+    for r in list(residue_distances):
+        if r <= sp_end or (gpi_start and r >= gpi_start):
+            del residue_distances[r]
         else:
             residue_distances[r] = max(0.0, residue_distances[r] - surface_offset)
 

@@ -410,6 +410,9 @@ def run_pipeline(
             target_metrics=all_metrics,
             targets=targets,
             output_path=str(figures_dir / "scoring_summary.png"),
+            distance_label="\u226440\u00c5" if max_distance_a else "\u226580\u00c5",
+            distance_value=max_distance_a or config.ECTODOMAIN_MIN_DISTANCE_A,
+            distance_mode="proximal" if max_distance_a else "distal",
         )
 
     # =====================================================================

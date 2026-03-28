@@ -463,7 +463,27 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
         sx = "_D" if role == "Distal" else "_P"
         prefix = "{}_{}".format(gene, role)  # for group names
 
-        # No topology coloring — white cartoon + green patches only
+        # Hide cleaved regions: signal peptide + GPI anchor signal
+        if zone.membrane:
+            from epitope_pipeline.membrane import _extract_signal_peptide_end
+            sp_end = _extract_signal_peptide_end(zone.target.features)
+            if sp_end > 0:
+                zlines.append("# --- Hide signal peptide (cleaved, 1-{}) ---".format(sp_end))
+                zlines.append("hide cartoon, {} and chain {} and resi 1-{}".format(pdb_obj, ch, sp_end))
+                zlines.append("")
+
+            if zone.membrane.topology_type == "gpi_anchored":
+                gpi_site = None
+                for feat in zone.target.features:
+                    if feat.get("type") == "Lipidation":
+                        gpi_site = feat.get("end")
+                        break
+                if gpi_site and gpi_site < zone.target.sequence_length:
+                    zlines.append("# --- Hide GPI signal (cleaved, {}-{}) ---".format(
+                        gpi_site + 1, zone.target.sequence_length))
+                    zlines.append("hide cartoon, {} and chain {} and resi {}-{}".format(
+                        pdb_obj, ch, gpi_site + 1, zone.target.sequence_length))
+                    zlines.append("")
 
         # --- Build filter tier sets (mirrors _write_pymol_script) ---
         patch_set = set()

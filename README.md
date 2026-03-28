@@ -170,15 +170,19 @@ The B-factor column in annotated PDBs encodes the epitope analysis:
 
 Each annotated PDB comes with a companion `.pml` script for PyMOL. The full structure is shown as white cartoon with green epitope patch surfaces (30% transparency). Selections are organized into collapsible groups: `Epitopes` (per-patch selections + combined) and `Filters` (pipeline tier selections, clickable but no default coloring). PDB files are dot-prefixed (hidden from file browsers) and loaded automatically by the PML script.
 
+**Cleaved region handling**: Signal peptide residues (N-terminal) and GPI anchor signal residues (C-terminal, after omega site) are hidden in PyMOL and excluded from the distance plot, since these regions are cleaved in the mature protein and never present on the cell surface.
+
+**PDB orientation**: All topology types have their PDB coordinates pre-rotated for consistent PyMOL orientation (membrane horizontal, ectodomain up):
+- **Single-pass TM / GPI**: Ecto-axis (anchor → farthest ECD residue) aligned to Y-up, anchor at origin
+- **Multi-pass TM**: Membrane normal aligned to Y-up, membrane center at origin
+
 ### Scoring Components
 
 | Component | Weight | Description |
 |-----------|--------|-------------|
-| Area | 25% | Patch size relative to VHH footprint (900 A²) |
-| Distance | 20% | Distance from membrane (normalized to 300A) |
+| Area | 60% | Log-scaled patch size (0.0 at 600 A², 1.0 at 5000 A²) |
 | Conservation | 25% | Cyno sequence identity within the patch |
-| Specificity | 20% | Patch-level off-target screen (% specific residues within patch) |
-| Accessibility | 10% | Average relative SASA (solvent exposure) |
+| Specificity | 15% | Per-residue max off-target identity across patch |
 
 ## Configuration
 
@@ -444,13 +448,11 @@ runs/YYMMDD_HHMM_bispecific_erbb2_nectin/
 
 ### Dual PML Alignment
 
-For **single-pass TM** targets, annotated PDB coordinates are rotated so the ecto-axis (anchor → farthest residue) aligns with Y-up and the anchor sits at the origin. This means kinked ectodomains extend straight up from the bilayer in PyMOL, and the bilayer CGO draws horizontally at Y = -half_thickness. When both targets in a bispecific pair are rotated, translation is purely along X and the shared bilayer is horizontal — no complex basis vector computation needed.
+All topology types have PDB coordinates pre-rotated for consistent orientation (membrane horizontal, ectodomain up):
+- **Single-pass TM / GPI**: Ecto-axis (anchor → farthest) aligned to Y-up, anchor at origin. Bilayer CGO at Y = -half_thickness.
+- **Multi-pass TM**: Membrane normal aligned to Y-up, membrane center at origin. Bilayer CGO at Y = 0.
 
-For **multi-pass TM / GPI** targets (no single anchor), the PDB coordinates are unmodified and the dual PML uses membrane-normal-based alignment:
-
-1. **Membrane-aligned view**: A `set_view` rotation matrix is computed so screen-Y = membrane normal and screen-X = side-by-side direction. An ectodomain-up check flips the view if needed.
-2. **Screen-right translation**: The proximal structure is translated along the `right` vector (perpendicular to the membrane normal in the viewing plane), not along model-X.
-3. **Vertical membrane alignment**: Both proteins' membrane centers are aligned along the normal axis so their TM regions sit at the same height.
+When both targets in a bispecific pair are rotated, translation is purely along X and the shared bilayer is horizontal.
 
 Epitope patches are shown as green surfaces (`show surface`) with 30% transparency. **Note**: PyMOL `ray_trace_mode 3` cannot render molecular surfaces — use `ray_trace_mode 0` or `1` for ray-traced images.
 

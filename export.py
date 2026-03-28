@@ -627,6 +627,37 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
                     "(ecto-axis -> Y-up, anchor res %d at origin)",
                     target.gene_name, spatial_filter.anchor_resnum)
 
+    # --- Multi-pass TM: rotate membrane normal -> Y-up ---
+    # Multi-pass proteins don't have a single anchor→farthest axis.
+    # Rotate so the membrane normal (pointing toward ectodomain) aligns
+    # with Y-up, and place the membrane center at the origin.
+    _multipass_rotated = False
+    if (_rotation_mat is None
+            and membrane
+            and membrane.topology_type == "multi_pass"):
+        _mp_normal = np.array(membrane.membrane_normal, dtype=float)
+        _mp_normal = _mp_normal / np.linalg.norm(_mp_normal)
+        # Ensure normal points toward ectodomain
+        ec_residues = [r for r, t in membrane.residue_topology.items()
+                       if t == "extracellular"]
+        if ec_residues:
+            from epitope_pipeline.utils import extract_ca_coords as _extract_ca
+            _ca_mp = _extract_ca(structure.pdb_path, structure.chain_id)
+            ec_coords = [_ca_mp[r] for r in ec_residues if r in _ca_mp]
+            if ec_coords:
+                ec_centroid = np.mean(ec_coords, axis=0)
+                if np.dot(ec_centroid - membrane.membrane_center,
+                          _mp_normal) < 0:
+                    _mp_normal = -_mp_normal
+        _rotation_mat = _rotation_matrix_align(
+            _mp_normal, np.array([0.0, 1.0, 0.0]))
+        _rotation_origin = np.array(membrane.membrane_center, dtype=float)
+        _multipass_rotated = True
+        logger.info(
+            "  %s: Rotating PDB coordinates "
+            "(membrane normal -> Y-up, membrane center at origin)",
+            target.gene_name)
+
     # --- Assign B-factors and occupancy ---
     for model in bio_structure:
         for chain in model:
@@ -794,6 +825,7 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
         patch_scores, membrane_ref_residues, residue_distances,
         scores, pdb_subdir=pdb_subdir,
         pdb_rotated=(_rotation_mat is not None),
+        multipass_rotated=_multipass_rotated,
     )
 
 
@@ -1203,7 +1235,8 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
                          patch_scores, membrane_ref_residues,
                          residue_distances, scores,
                          pdb_subdir="Structures",
-                         pdb_rotated=False):
+                         pdb_rotated=False,
+                         multipass_rotated=False):
     """
     Write a .pml PyMOL script that creates named, clickable selections
     in the PyMOL object panel (right sidebar).
@@ -1293,12 +1326,29 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
         "",
     ]
 
-    # For AlphaFold full-length structures, hide TM + cytoplasmic domains
-    # to keep the view focused on the ectodomain.
-    # For multi-pass proteins, show everything (TM bundle is integral to the structure).
-    # For single-pass / GPI, hide only residues below the membrane plane using
-    # spatial distance data (more reliable than topology classification alone).
-    # No topology coloring — white cartoon + green patches only
+    # Hide cleaved regions: signal peptide + GPI anchor signal
+    if membrane:
+        from epitope_pipeline.membrane import _extract_signal_peptide_end
+        sp_end = _extract_signal_peptide_end(target.features)
+        if sp_end > 0:
+            lines.append("# --- Hide signal peptide (cleaved, residues 1-{}) ---".format(sp_end))
+            lines.append("hide cartoon, {} and chain {} and resi 1-{}".format(pdb_name, ch, sp_end))
+            lines.append("")
+
+        # GPI anchor: hide residues after omega site (cleaved C-terminal signal)
+        if membrane.topology_type == "gpi_anchored":
+            # Find omega site from lipidation feature
+            gpi_site = None
+            for feat in target.features:
+                if feat.get("type") == "Lipidation":
+                    gpi_site = feat.get("end")
+                    break
+            if gpi_site and gpi_site < target.sequence_length:
+                lines.append("# --- Hide GPI signal (cleaved, residues {}-{}) ---".format(
+                    gpi_site + 1, target.sequence_length))
+                lines.append("hide cartoon, {} and chain {} and resi {}-{}".format(
+                    pdb_name, ch, gpi_site + 1, target.sequence_length))
+                lines.append("")
 
     # =============================================
     # EPITOPE PATCHES — grouped under "Epitopes"
@@ -1387,14 +1437,22 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
     if membrane:
         pdb_file = Path(run_dir) / pdb_subdir / ".{}_epitope.pdb".format(gene)
         if pdb_rotated:
-            # PDB coordinates are rotated: ecto-axis = Y-up, anchor at origin.
-            # Draw bilayer horizontally at Y = -half_thickness.
-            ht = membrane.membrane_half_thickness
-            lines.extend(generate_membrane_cgo_pml(
-                membrane, str(pdb_file), ch,
-                normal_override=np.array([0.0, 1.0, 0.0]),
-                center_override=np.array([0.0, -ht, 0.0]),
-            ))
+            if multipass_rotated:
+                # Multi-pass: membrane center is at origin after rotation.
+                lines.extend(generate_membrane_cgo_pml(
+                    membrane, str(pdb_file), ch,
+                    normal_override=np.array([0.0, 1.0, 0.0]),
+                    center_override=np.array([0.0, 0.0, 0.0]),
+                ))
+            else:
+                # Single-pass/GPI: anchor (TM/ecto boundary) at origin.
+                # Membrane center is half_thickness below.
+                ht = membrane.membrane_half_thickness
+                lines.extend(generate_membrane_cgo_pml(
+                    membrane, str(pdb_file), ch,
+                    normal_override=np.array([0.0, 1.0, 0.0]),
+                    center_override=np.array([0.0, -ht, 0.0]),
+                ))
         else:
             lines.extend(generate_membrane_cgo_pml(
                 membrane, str(pdb_file), ch,
@@ -1429,11 +1487,49 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
             "",
         ])
     else:
+        # Multi-pass: compute set_view matrix so membrane normal = screen-Y
+        normal = np.array(membrane.membrane_normal)
+        n_len = np.linalg.norm(normal)
+        up = normal / n_len if n_len > 0 else np.array([0., 1., 0.])
+
+        # Build orthonormal basis: right, up, forward
+        right = np.array([1.0, 0.0, 0.0])
+        right = right - np.dot(right, up) * up
+        if np.linalg.norm(right) < 0.01:
+            right = np.array([0.0, 0.0, 1.0])
+            right = right - np.dot(right, up) * up
+        right = right / np.linalg.norm(right)
+        fwd = np.cross(right, up)
+        fwd = fwd / np.linalg.norm(fwd)
+
+        # Determine if normal points toward ectodomain or away
+        # Use centroid of extracellular residues vs membrane center
+        mem_center = np.array(membrane.membrane_center)
+        ec_residues = [r for r, t in membrane.residue_topology.items() if t == "extracellular"]
+        if ec_residues:
+            from epitope_pipeline.utils import extract_ca_coords
+            ca = extract_ca_coords(structure.pdb_path, structure.chain_id)
+            ec_coords = [ca[r] for r in ec_residues if r in ca]
+            if ec_coords:
+                ec_centroid = np.mean(ec_coords, axis=0)
+                # If normal points away from ectodomain, flip it
+                if np.dot(ec_centroid - mem_center, up) < 0:
+                    up = -up
+                    fwd = -fwd
+
         lines.extend([
-            "# --- Final display settings ---",
+            "# --- Membrane-aligned view (multi-pass) ---",
             "deselect",
-            "orient {} and chain {}".format(pdb_name, ch),
-            "zoom {} and chain {}".format(pdb_name, ch),
+            "set_view (\\",
+            "    {:.6f}, {:.6f}, {:.6f},\\".format(right[0], right[1], right[2]),
+            "    {:.6f}, {:.6f}, {:.6f},\\".format(up[0], up[1], up[2]),
+            "    {:.6f}, {:.6f}, {:.6f},\\".format(fwd[0], fwd[1], fwd[2]),
+            "    0.000000, 0.000000, -400.000000,\\",
+            "    {:.2f}, {:.2f}, {:.2f},\\".format(
+                mem_center[0], mem_center[1], mem_center[2]),
+            "    100.000000, 900.000000, -20.000000)",
+            "",
+            "zoom",
             "# --- Ray trace settings ---",
             "set ray_opaque_background, on",
             "bg_color black",

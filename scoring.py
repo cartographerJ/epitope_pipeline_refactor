@@ -144,12 +144,26 @@ def compute_target_epitope_metric(scores, surface_analysis):
 
     fraction = total_epitope / total_ectodomain if total_ectodomain > 0 else 0.0
 
+    # Target-level druggability score: area * quality
+    import math
+    area_component = min(total_epitope / 5000.0, 1.0)
+    # Mean cyno identity across ALL qualifying patch residues (area-weighted)
+    total_res = sum(s.n_residues for s in scores)
+    quality_component = (
+        sum(s.cyno_identity * s.n_residues for s in scores) / total_res
+        if total_res > 0 else 0.0
+    )
+    target_score = area_component * quality_component
+
     return {
         "total_epitope_area_a2": total_epitope,
         "total_ectodomain_area_a2": total_ectodomain,
         "epitope_fraction": fraction,
         "n_patches": len(scores),
         "best_score": scores[0].composite_score if scores else 0.0,
+        "target_score": target_score,
+        "area_component": area_component,
+        "quality_component": quality_component,
     }
 
 
@@ -163,30 +177,28 @@ def _score_patch(patch, target, conservation_result, specificity_result,
     Compute component scores and composite score for a single patch.
     """
     # --- Area score ---
-    # Normalize by the typical VHH footprint max (900 A²)
+    # Log scale: 0.0 at 600 A² minimum, 1.0 at 5000 A²
+    import math
     area = patch.total_sasa_a2
-    area_score = min(area / VHH_FOOTPRINT_MAX_A2, 1.0)
+    area_score = min(max(math.log2(area / 600.0) / math.log2(5000.0 / 600.0), 0.0), 1.0)
 
     # --- Distance score ---
     avg_dist = patch.avg_distance_from_membrane
-    if distance_mode == "proximal":
-        # Proximal mode: flat 1.0 — filter already ensures <= threshold
-        distance_score = 1.0
-    else:
-        # Distal mode: reward HIGH distance from membrane
-        distance_score = min(avg_dist / 300.0, 1.0)
+    distance_score = 0.0  # Not used in composite — filter already enforces
 
     # --- Conservation score ---
     cyno_identity = conservation_result.patch_conservation.get(patch.patch_id, 0.0)
     conservation_score = cyno_identity
 
     # --- Specificity score ---
-    # Check BLAST hits for this patch: 1 - max_off_target_identity
+    # Per-residue: mean off-target identity across patch residues
     max_off_target = 0.0
-    patch_hits = specificity_result.blast_results.get(patch.patch_id, [])
-    for hit in patch_hits:
-        if hit["identity"] > max_off_target:
-            max_off_target = hit["identity"]
+    if specificity_result.residue_identity_scores:
+        patch_identities = [
+            specificity_result.residue_identity_scores.get(r, 0.0)
+            for r in patch.residue_numbers
+        ]
+        max_off_target = max(patch_identities) if patch_identities else 0.0
     specificity_score = 1.0 - max_off_target
 
     # --- Accessibility score ---
@@ -196,16 +208,13 @@ def _score_patch(patch, target, conservation_result, specificity_result,
         for r in patch.residue_numbers
     ]
     avg_rel_sasa = sum(rel_sasa_values) / len(rel_sasa_values) if rel_sasa_values else 0.0
-    accessibility_score = min(avg_rel_sasa / 0.6, 1.0)  # Normalize; >60% rel SASA is very exposed
+    accessibility_score = 0.0  # Not used in composite — filter already enforces
 
-    # --- Composite ---
-    w = SCORE_WEIGHTS
+    # --- Composite (area-dominant, filters did the rest) ---
     composite = (
-        w["area"] * area_score +
-        w["distance"] * distance_score +
-        w["conservation"] * conservation_score +
-        w["specificity"] * specificity_score +
-        w["accessibility"] * accessibility_score
+        0.60 * area_score +
+        0.25 * conservation_score +
+        0.15 * specificity_score
     )
 
     # Build residue range string

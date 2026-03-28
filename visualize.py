@@ -156,7 +156,7 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         # Figure is ~12 inches, so ~1200 points. Each char at fontsize 7 bold ≈ 5pt.
         fig_width_pts = 18 * 72  # 1296 points
         block_pts = (span / seq_len) * fig_width_pts
-        char_width = 4.5 if fcolor == COLOR_TRANSMEMBRANE else 5.0  # TM labels are short
+        char_width = 7.0  # conservative — accounts for bold font + padding
         max_chars = max(0, int(block_pts / char_width) - 1)
 
         if max_chars < 2:
@@ -484,7 +484,8 @@ def _collect_domain_blocks(target):
     return filtered
 
 
-def plot_scoring_summary(all_scores, target_metrics, targets, output_path):
+def plot_scoring_summary(all_scores, target_metrics, targets, output_path,
+                         distance_label=None, distance_value=None, distance_mode=None):
     """
     Multi-target comparison bar chart.
 
@@ -499,62 +500,74 @@ def plot_scoring_summary(all_scores, target_metrics, targets, output_path):
         targets: List of TargetInfo objects.
         output_path: Path to save PNG.
     """
-    gene_names = [t.gene_name for t in targets]
-    n_targets = len(targets)
-
-    total_areas = []
-    n_patches_list = []
-    best_scores = []
-
+    # Collect data, sort by target score descending
+    entries = []
     for t in targets:
         uid = t.uniprot_id
         metric = target_metrics.get(uid, {})
-        total_areas.append(metric.get("total_epitope_area_a2", 0.0))
-        n_patches_list.append(metric.get("n_patches", 0))
-        best_scores.append(metric.get("best_score", 0.0))
+        entries.append({
+            "gene": t.gene_name,
+            "target_score": metric.get("target_score", 0.0),
+            "area_component": metric.get("area_component", 0.0),
+            "quality_component": metric.get("quality_component", 0.0),
+            "total_area": metric.get("total_epitope_area_a2", 0.0),
+            "n_patches": metric.get("n_patches", 0),
+        })
+    entries.sort(key=lambda e: e["target_score"], reverse=True)
 
-    fig, axes = plt.subplots(1, 3, figsize=(4 * n_targets, 5))
-    fig.suptitle("Epitope Space Summary", fontsize=16, fontweight="bold")
+    gene_names = [e["gene"] for e in entries]
+    target_scores = [e["target_score"] for e in entries]
+    area_components = [e["area_component"] for e in entries]
+    quality_components = [e["quality_component"] for e in entries]
+    total_areas = [e["total_area"] for e in entries]
+    n_patches_list = [e["n_patches"] for e in entries]
+    n_targets = len(entries)
+
+    fig, axes = plt.subplots(1, 2, figsize=(max(10, 2.5 * n_targets), 5))
+    fig.suptitle("Epitope Druggability Summary", fontsize=16, fontweight="bold")
 
     x = np.arange(n_targets)
     bar_width = 0.6
 
-    # Panel 1: Total epitope area
+    # Panel 1: Target druggability score
     ax1 = axes[0]
-    bars1 = ax1.bar(x, total_areas, bar_width, color=PALETTE["teal"], alpha=0.8)
+    bars1 = ax1.bar(x, target_scores, bar_width, color=PALETTE["dark_purple"], alpha=0.85)
     ax1.set_xticks(x)
     ax1.set_xticklabels(gene_names, fontsize=12)
-    ax1.set_ylabel("Total Epitope Area (A²)", fontsize=12)
-    ax1.set_title("Epitope Surface", fontsize=13)
-    for bar, val in zip(bars1, total_areas):
+    ax1.set_ylabel("Target Score", fontsize=12)
+    ax1.set_title("Druggability Score", fontsize=13)
+    ax1.set_ylim(0, 1.05)
+    for bar, val in zip(bars1, target_scores):
         if val > 0:
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                     "{:.0f}".format(val), ha="center", va="bottom", fontsize=11)
+                     "{:.2f}".format(val), ha="center", va="bottom", fontsize=11)
 
-    # Panel 2: Number of patches
+    # Panel 2: Total epitope area with patch count annotations
     ax2 = axes[1]
-    bars2 = ax2.bar(x, n_patches_list, bar_width, color=PALETTE["green"], alpha=0.8)
+    bars2 = ax2.bar(x, total_areas, bar_width, color=PALETTE["teal"], alpha=0.8)
     ax2.set_xticks(x)
     ax2.set_xticklabels(gene_names, fontsize=12)
-    ax2.set_ylabel("Number of Patches", fontsize=12)
-    ax2.set_title("Qualifying Patches", fontsize=13)
-    ax2.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
-    for bar, val in zip(bars2, n_patches_list):
-        ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                 str(val), ha="center", va="bottom", fontsize=11)
-
-    # Panel 3: Best composite score
-    ax3 = axes[2]
-    bars3 = ax3.bar(x, best_scores, bar_width, color=PALETTE["dark_purple"], alpha=0.8)
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(gene_names, fontsize=12)
-    ax3.set_ylabel("Composite Score", fontsize=12)
-    ax3.set_title("Best Patch Score", fontsize=13)
-    ax3.set_ylim(0, 1.0)
-    for bar, val in zip(bars3, best_scores):
+    ax2.set_ylabel("Total Epitope Area (\u00c5\u00b2)", fontsize=12)
+    ax2.set_title("Epitope Surface", fontsize=13)
+    for bar, val, n in zip(bars2, total_areas, n_patches_list):
         if val > 0:
-            ax3.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                     "{:.3f}".format(val), ha="center", va="bottom", fontsize=11)
+            label = "{:.0f} ({})".format(val, n)
+            ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                     label, ha="center", va="bottom", fontsize=10)
+
+    # Footer with filter parameters
+    from epitope_pipeline import config
+    if distance_mode == "proximal":
+        dist_str = "\u2264{:.0f}\u00c5 from membrane".format(distance_value or 40)
+    else:
+        dist_str = "\u2265{:.0f}\u00c5 from membrane".format(distance_value or 80)
+    cyno_conserved = 100.0 - config.MAX_CYNO_MISMATCH_PERCENT
+    specific_pct = 100.0 - config.MAX_NONSPECIFIC_PERCENT
+    footer = "Filtered: {}, SASA >{:.0f}%, \u2265{:.0f}% cyno conserved (scaled), \u2265{:.0f}% specific (scaled)".format(
+        dist_str, config.SURFACE_EXPOSURE_THRESHOLD * 100,
+        cyno_conserved, specific_pct,
+    )
+    fig.text(0.5, -0.02, footer, ha="center", fontsize=9, color="#888888", fontstyle="italic")
 
     plt.tight_layout()
 
