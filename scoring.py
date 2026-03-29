@@ -14,10 +14,6 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from epitope_pipeline.config import (
-    SCORE_WEIGHTS,
-    VHH_FOOTPRINT_MAX_A2,
-)
 
 logger = logging.getLogger(__name__)
 

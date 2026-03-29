@@ -49,6 +49,14 @@ results = run_pipeline(
 python -m epitope_pipeline.run ERBB2 EGFR
 ```
 
+### Web Interface
+
+```bash
+streamlit run epitope_pipeline/app.py
+```
+
+Interactive Streamlit app supporting single-target and bispecific modes with configurable distance thresholds, cyno mismatch %, and non-specific %. Results are displayed inline with epitope maps and downloadable outputs.
+
 ## Pipeline Steps
 
 | Step | Module | Description |
@@ -60,7 +68,7 @@ python -m epitope_pipeline.run ERBB2 EGFR
 | 5 | `surface.py` | Calculate SASA, cluster into surface patches ≥600 A² |
 | 6 | `conservation.py` | Align with cyno ortholog, size-scaled patch evaluation (base 15%, sqrt scaling, 30% cap) |
 | 7 | `specificity.py` | Full-sequence BLAST, size-scaled patch evaluation (same formula) + merge adjacent patches |
-| 8 | `scoring.py` | Composite score: area + distance + conservation + specificity + accessibility |
+| 8 | `scoring.py` | Composite score: area (60%) + conservation (25%) + specificity (15%) |
 | 9 | `export.py` | Generate all output files (CSV, XLSX, PDB, FASTA, JSON) |
 | 10 | `visualize.py` | 6-track epitope map with domains, distance, SASA, conservation, specificity |
 
@@ -115,12 +123,15 @@ All per-residue conservation and specificity data is preserved for diagnostic pu
 Each run creates a date-stamped directory under `runs/`:
 
 ```
-runs/2026-02-24_erbb2_egfr/
-├── epitope_candidates.csv          # Main results table
+runs/YYMMDD_HHMM_erbb2_egfr/
+├── .epitope_candidates.csv         # Main results table (hidden)
 ├── Figures/
 │   ├── erbb2_epitope_map.png       # Linear epitope map
 │   ├── egfr_epitope_map.png
-│   └── scoring_summary.png         # Multi-target comparison
+│   ├── scoring_summary.png         # Multi-target druggability comparison
+│   └── BLAST/
+│       ├── erbb2_blast_offtargets.png
+│       └── egfr_blast_offtargets.png
 ├── Structures/
 │   ├── erbb2_epitope.pml           # PyMOL session script (visible)
 │   ├── .erbb2_epitope.pdb          # Annotated PDB (hidden, loaded by PML)
@@ -156,17 +167,19 @@ The `Supplementary Files/BLAST/` directory contains two files per target for ful
 
 ### Annotated PDB Scoring Scheme
 
-The B-factor column in annotated PDBs encodes the epitope analysis:
+The B-factor column in annotated PDBs encodes a tiered epitope analysis:
 
 | B-factor | Meaning |
 |----------|---------|
-| > 50 | Epitope patch residue (composite_score × 100) |
-| 25 | Extracellular, not in qualifying patch |
-| 0 | Transmembrane |
-| -25 | Intracellular |
-
-**PyMOL**: `spectrum b, blue_white_red`
-**ChimeraX**: `color bfactor palette cyan:white:green`
+| -20 | Non-target chain (antibody, etc.) |
+| 0 | Intracellular |
+| 10 | Transmembrane |
+| 25 | Extracellular (below distance cutoff) |
+| 40 | Distance-qualified (≥ threshold) |
+| 55 | + Surface exposed (rel SASA > 25%) |
+| 70 | + Cyno conserved |
+| 80-95 | Epitope patch (composite_score × 100) |
+| 99 | Membrane reference (3 most proximal) |
 
 Each annotated PDB comes with a companion `.pml` script for PyMOL. The full structure is shown as white cartoon with green epitope patch surfaces (30% transparency). Selections are organized into collapsible groups: `Epitopes` (per-patch selections + combined) and `Filters` (pipeline tier selections, clickable but no default coloring). PDB files are dot-prefixed (hidden from file browsers) and loaded automatically by the PML script.
 

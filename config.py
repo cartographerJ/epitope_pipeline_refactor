@@ -123,14 +123,13 @@ USE_LOCAL_BLAST = True                  # Toggle: True = local blastp, False = r
 LOCAL_BLAST_DB_PATH = PIPELINE_ROOT / "blast_db" / "swissprot" / "swissprot_human"
 
 # ---------------------------------------------------------------------------
-# Scoring weights (composite epitope score)
+# Scoring weights — DEPRECATED: not used by scoring.py (hardcoded 60/25/15)
+# Kept for backward compatibility with external callers only.
 # ---------------------------------------------------------------------------
 SCORE_WEIGHTS = {
-    "area":          0.25,
-    "distance":      0.20,
+    "area":          0.60,
     "conservation":  0.25,
-    "specificity":   0.20,
-    "accessibility": 0.10,
+    "specificity":   0.15,
 }
 
 # ---------------------------------------------------------------------------
