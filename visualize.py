@@ -109,16 +109,26 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
             patch_residues.add(r)
 
     # ---- Create 6-track figure ----
+    # Font sizes scaled for slide legibility at 30-40% of slide width
     fig, axes = plt.subplots(
         6, 1,
-        figsize=(18, 11),
+        figsize=(26, 16),
         gridspec_kw={"height_ratios": [0.7, 1.4, 1.4, 0.4, 0.4, 0.5]},
         sharex=True,
     )
     title = "{} ({}) \u2014 Epitope Analysis".format(target.gene_name, target.uniprot_id)
     if title_suffix:
         title += " \u2014 {}".format(title_suffix)
-    fig.suptitle(title, fontsize=16, fontweight="bold", y=0.98)
+    fig.suptitle(title, fontsize=36, fontweight="bold", y=0.98)
+
+    # Y-axis labels: place at a fixed x in figure coords so they left-align
+    _YLABEL_X = 0.06  # fixed x position (figure fraction)
+    _YLABEL_KW = dict(fontsize=24, ha="left", va="center", fontweight="bold")
+
+    def _ylabel(ax, text):
+        """Place y-axis label at fixed x so all labels left-align."""
+        mid_y = (ax.get_position().y0 + ax.get_position().y1) / 2.0
+        fig.text(_YLABEL_X, mid_y, text, transform=fig.transFigure, **_YLABEL_KW)
 
     # ==================================================================
     # Track 1: Domains (compact blocks with topology brackets above)
@@ -127,7 +137,6 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     ax_dom.set_xlim(0.5, seq_len + 0.5)
     ax_dom.set_ylim(0, 1)
     ax_dom.set_yticks([])
-    ax_dom.set_ylabel("Domains", fontsize=11, rotation=0, ha="right", va="center")
 
     # --- Topology brackets above the domain blocks ---
     _draw_topology_brackets(ax_dom, target, membrane, seq_len)
@@ -152,16 +161,14 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         text_color = "white" if fcolor in (COLOR_TRANSMEMBRANE, PALETTE["blue"]) else "black"
 
         # Estimate how many characters fit based on block fraction of figure width
-        # A 12-inch-wide figure at ~100 dpi with fontsize 7 bold fits ~1 char per 6px
-        # Figure is ~12 inches, so ~1200 points. Each char at fontsize 7 bold ≈ 5pt.
-        fig_width_pts = 18 * 72  # 1296 points
+        fig_width_pts = 26 * 72  # 1872 points
         block_pts = (span / seq_len) * fig_width_pts
-        char_width = 7.0  # conservative — accounts for bold font + padding
+        char_width = 16.0  # scaled for slide-legible fontsize
         max_chars = max(0, int(block_pts / char_width) - 1)
 
         if max_chars < 2:
             continue  # too small for any label
-        fontsize = 7 if span < 80 else 9
+        fontsize = 16 if span < 80 else 20
         display_label = label[:max_chars] + ".." if len(label) > max_chars else label
 
         ax_dom.text(
@@ -203,10 +210,10 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         thresh = spatial_filter.min_distance_threshold
     ax_dist.axhline(
         y=thresh, color=PALETTE["dark_purple"],
-        linestyle="--", linewidth=1, alpha=0.7,
+        linestyle="--", linewidth=2, alpha=0.7,
     )
-    ax_dist.set_ylabel("Dist from\nmembrane (A)", fontsize=11)
-    ax_dist.tick_params(labelsize=10)
+    # y-label set after tight_layout
+    ax_dist.tick_params(labelsize=20)
 
     # ==================================================================
     # Track 3: SASA
@@ -219,9 +226,9 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
             color=PALETTE["teal"], alpha=0.6, linewidth=0,
         )
 
-    ax_sasa.set_ylabel("SASA (A\u00B2)", fontsize=11)
+    # y-label set after tight_layout
     ax_sasa.set_ylim(bottom=0)
-    ax_sasa.tick_params(labelsize=10)
+    ax_sasa.tick_params(labelsize=20)
 
     # ==================================================================
     # Track 4: Cyno conservation (per-residue band)
@@ -230,13 +237,13 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     for i, color in enumerate(conservation_colors):
         ax_cons.axvspan(i + 0.5, i + 1.5, color=color, alpha=0.8)
     ax_cons.set_yticks([])
-    ax_cons.set_ylabel("Cyno\nConserv.", fontsize=11, rotation=0, ha="right", va="center")
+    # y-label set after tight_layout
 
     # Label when no cyno ortholog exists
     if not conservation_result and not target.cyno_sequence:
         ax_cons.text(
             seq_len / 2.0, 0.5, "No cyno ortholog found",
-            ha="center", va="center", fontsize=11, fontstyle="italic",
+            ha="center", va="center", fontsize=22, fontstyle="italic",
             color="#888888", transform=ax_cons.get_xaxis_transform(),
         )
 
@@ -247,7 +254,7 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     for i, color in enumerate(specificity_colors):
         ax_spec.axvspan(i + 0.5, i + 1.5, color=color, alpha=0.8)
     ax_spec.set_yticks([])
-    ax_spec.set_ylabel("Human\nSpecific.", fontsize=11, rotation=0, ha="right", va="center")
+    # y-label set after tight_layout
 
     # ==================================================================
     # Track 6: Target epitope (final qualifying patches)
@@ -260,8 +267,9 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
             ax_patch.axvspan(i + 0.5, i + 1.5, color=COLOR_EPITOPE_PATCH, alpha=0.9)
 
     ax_patch.set_yticks([])
-    ax_patch.set_ylabel("Target\nEpitope", fontsize=11, rotation=0, ha="right", va="center")
-    ax_patch.set_xlabel("Residue Position", fontsize=12)
+    # y-label set after tight_layout
+    ax_patch.set_xlabel("Residue Position", fontsize=26)
+    ax_patch.tick_params(labelsize=20)
 
     # Patch labels (score + rank) — stagger y positions to avoid overlap
     if scores:
@@ -272,22 +280,21 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         elif n == 2:
             y_levels = [0.75, 0.25]
         else:
-            # Evenly space n labels between 0.15 and 0.85
             y_levels = [0.85 - i * 0.7 / (n - 1) for i in range(n)]
         for i, s in enumerate(labeled):
             y_pos = y_levels[i]
             center = np.mean(s.patch.residue_numbers)
-            label = "P{} {:.0f}A\u00B2 | {:.2f}".format(
+            label = "P{} {:.0f}\u00c5\u00B2 | {:.2f}".format(
                 s.rank, s.patch_area_a2, s.composite_score)
             ax_patch.text(
                 center, y_pos, label,
-                ha="center", va="center", fontsize=8, fontweight="bold",
+                ha="center", va="center", fontsize=20, fontweight="bold",
                 transform=ax_patch.get_xaxis_transform(),
             )
     else:
         ax_patch.text(
             seq_len / 2.0, 0.5, "No qualifying epitope patches",
-            ha="center", va="center", fontsize=11, fontstyle="italic",
+            ha="center", va="center", fontsize=22, fontstyle="italic",
             color="#888888", transform=ax_patch.get_xaxis_transform(),
         )
 
@@ -303,11 +310,19 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         mpatches.Patch(color=COLOR_EPITOPE_PATCH, label="Target Epitope"),
     ]
     fig.legend(
-        handles=legend_patches, loc="lower center", ncol=3, fontsize=10,
+        handles=legend_patches, loc="lower center", ncol=3, fontsize=18,
         frameon=True, fancybox=True,
     )
 
-    plt.tight_layout(rect=[0, 0.06, 1, 0.96])
+    plt.tight_layout(rect=[0.14, 0.06, 1, 0.96])
+
+    # Place y-axis labels AFTER tight_layout so axis positions are finalized
+    _ylabel(ax_dom, "Domains")
+    _ylabel(ax_dist, "Membrane\ndist. (\u00c5)")
+    _ylabel(ax_sasa, "SASA (\u00c5\u00b2)")
+    _ylabel(ax_cons, "Cyno\nConserv.")
+    _ylabel(ax_spec, "Human\nSpecific.")
+    _ylabel(ax_patch, "Target\nEpitope")
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -363,21 +378,21 @@ def _draw_topology_brackets(ax, target, membrane, seq_len):
         span = end - start + 1
         # Horizontal line
         ax.plot([start, end], [bracket_y, bracket_y],
-                color=color, linewidth=1.0, clip_on=False, zorder=5)
+                color=color, linewidth=1.5, clip_on=False, zorder=5)
         # Downward ticks at ends
         ax.plot([start, start], [bracket_y, bracket_y - tick_h],
-                color=color, linewidth=1.0, clip_on=False, zorder=5)
+                color=color, linewidth=1.5, clip_on=False, zorder=5)
         ax.plot([end, end], [bracket_y, bracket_y - tick_h],
-                color=color, linewidth=1.0, clip_on=False, zorder=5)
+                color=color, linewidth=1.5, clip_on=False, zorder=5)
         # Centered label above — skip if span too narrow for text
-        fig_width_pts = 18 * 72
+        fig_width_pts = 20 * 72
         block_pts = (span / seq_len) * fig_width_pts
-        max_chars = max(0, int(block_pts / 6.0) - 1)
+        max_chars = max(0, int(block_pts / 14.0) - 1)
         if max_chars >= 3:
             display_label = label[:max_chars] + ".." if len(label) > max_chars else label
             center = (start + end) / 2.0
             ax.text(center, label_y, display_label,
-                    ha="center", va="bottom", fontsize=9, color=color,
+                    ha="center", va="bottom", fontsize=18, color=color,
                     fontweight="bold", zorder=5)
 
 
