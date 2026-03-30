@@ -85,8 +85,7 @@ def plot_bispecific_epitope_map(orientation, output_path):
 
     # Legend
     legend_patches = [
-        mpatches.Patch(color=PALETTE["teal"], label="InterPro Domain"),
-        mpatches.Patch(color=PALETTE["blue"], label="UniProt Domain"),
+        mpatches.Patch(color=PALETTE["teal"], label="Domain"),
         mpatches.Patch(color=COLOR_TRANSMEMBRANE, label="Transmembrane"),
         mpatches.Patch(color=PALETTE["mint"], label="Conserved / Specific"),
         mpatches.Patch(color=COLOR_MISMATCH, label="Mismatch / Non-specific"),
@@ -322,7 +321,7 @@ def _draw_zone_panel(fig, gs, zone_result, zone):
         )
         ax_dom.add_patch(rect)
         center = (start + end) / 2.0
-        text_color = "white" if fcolor in (COLOR_TRANSMEMBRANE, PALETTE["blue"]) else "black"
+        text_color = "white" if fcolor == COLOR_TRANSMEMBRANE else "black"
         fig_width_pts = 12 * 72
         block_pts = (span / seq_len) * fig_width_pts
         char_width = 4.5 if fcolor == COLOR_TRANSMEMBRANE else 5.0
@@ -588,8 +587,7 @@ def plot_bispecific_combined(pair_result, output_path):
 
     # Legend
     legend_patches = [
-        mpatches.Patch(color=PALETTE["teal"], label="InterPro Domain"),
-        mpatches.Patch(color=PALETTE["blue"], label="UniProt Domain"),
+        mpatches.Patch(color=PALETTE["teal"], label="Domain"),
         mpatches.Patch(color=COLOR_TRANSMEMBRANE, label="Transmembrane"),
         mpatches.Patch(color=COLOR_EPITOPE_PATCH, label="Epitope Patch"),
     ]
@@ -634,8 +632,7 @@ def _draw_horizontal_domains(ax, zone_result):
         )
         ax.add_patch(rect)
         center = (start + end) / 2.0
-        text_color = ("white" if fcolor in (COLOR_TRANSMEMBRANE, PALETTE["blue"])
-                      else "black")
+        text_color = "white" if fcolor == COLOR_TRANSMEMBRANE else "black"
         fig_width_pts = 8 * 72  # combined figure is narrower (~8 inches per column)
         block_pts = (span / seq_len) * fig_width_pts
         char_width = 4.5 if fcolor == COLOR_TRANSMEMBRANE else 5.0

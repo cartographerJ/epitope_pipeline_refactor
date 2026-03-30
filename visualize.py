@@ -112,14 +112,14 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     # Font sizes scaled for slide legibility at 30-40% of slide width
     fig, axes = plt.subplots(
         6, 1,
-        figsize=(26, 16),
+        figsize=(28.6, 16),
         gridspec_kw={"height_ratios": [0.7, 1.4, 1.4, 0.4, 0.4, 0.5]},
         sharex=True,
     )
     title = "{} ({}) \u2014 Epitope Analysis".format(target.gene_name, target.uniprot_id)
     if title_suffix:
         title += " \u2014 {}".format(title_suffix)
-    fig.suptitle(title, fontsize=36, fontweight="bold", y=0.98)
+    fig.suptitle(title, fontsize=36, fontweight="bold", y=0.94)
 
     # Y-axis labels: place at a fixed x in figure coords so they left-align
     _YLABEL_X = 0.06  # fixed x position (figure fraction)
@@ -149,21 +149,46 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
 
     block_y = 0.05
     block_h = 0.55
+
+    # Collect TM ranges for visible-gap calculation
+    _tm_ranges = [(s, e) for s, e, l, c in domain_blocks
+                  if l == "TM" or l == "GPI"]
+
     for start, end, label, fcolor in domain_blocks:
         span = end - start + 1
+        is_tm = label in ("TM", "SP", "GPI")
         rect = plt.Rectangle(
             (start - 0.5, block_y), span, block_h,
             facecolor=fcolor, edgecolor="#333333", linewidth=0.7,
-            alpha=0.85, zorder=3,
+            alpha=0.85, zorder=4 if is_tm else 3,
         )
         ax_dom.add_patch(rect)
-        center = (start + end) / 2.0
-        text_color = "white" if fcolor in (COLOR_TRANSMEMBRANE, PALETTE["blue"]) else "black"
+        text_color = "white" if fcolor == COLOR_TRANSMEMBRANE else "black"
 
-        # Estimate how many characters fit based on block fraction of figure width
-        fig_width_pts = 26 * 72  # 1872 points
-        block_pts = (span / seq_len) * fig_width_pts
-        char_width = 16.0  # scaled for slide-legible fontsize
+        # For blocks that overlap TM segments (e.g. InterPro rhodopsin),
+        # use the largest visible gap between TMs for text sizing
+        effective_span = span
+        if not is_tm:
+            overlapping_tms = [(max(s, start), min(e, end))
+                               for s, e in _tm_ranges
+                               if s <= end and e >= start]
+            if overlapping_tms:
+                boundaries = sorted(set([start] + [e + 1 for _, e in overlapping_tms]
+                                        + [s for s, _ in overlapping_tms] + [end + 1]))
+                gaps = []
+                for i in range(len(boundaries) - 1):
+                    gap_s, gap_e = boundaries[i], boundaries[i + 1]
+                    in_tm = any(ts <= gap_s and gap_e <= te + 1
+                                for ts, te in overlapping_tms)
+                    if not in_tm:
+                        gaps.append(gap_e - gap_s)
+                if gaps:
+                    effective_span = max(gaps)
+
+        center = (start + end) / 2.0
+        fig_width_pts = 28.6 * 72  # 2059 points
+        block_pts = (effective_span / seq_len) * fig_width_pts
+        char_width = 30.0  # conservative for slide-legible bold fontsize
         max_chars = max(0, int(block_pts / char_width) - 1)
 
         if max_chars < 2:
@@ -171,11 +196,31 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         fontsize = 16 if span < 80 else 20
         display_label = label[:max_chars] + ".." if len(label) > max_chars else label
 
-        ax_dom.text(
+        # Place text in the center of the largest visible gap
+        if fcolor not in (COLOR_TRANSMEMBRANE,) and label not in ("TM", "SP", "GPI") and _tm_ranges:
+            overlapping_tms = [(max(s, start), min(e, end))
+                               for s, e in _tm_ranges
+                               if s <= end and e >= start]
+            if overlapping_tms:
+                boundaries = sorted(set([start] + [e + 1 for _, e in overlapping_tms]
+                                        + [s for s, _ in overlapping_tms] + [end + 1]))
+                best_gap_center = center
+                best_gap_size = 0
+                for i in range(len(boundaries) - 1):
+                    gap_s, gap_e = boundaries[i], boundaries[i + 1]
+                    in_tm = any(ts <= gap_s and gap_e <= te + 1
+                                for ts, te in overlapping_tms)
+                    if not in_tm and (gap_e - gap_s) > best_gap_size:
+                        best_gap_size = gap_e - gap_s
+                        best_gap_center = (gap_s + gap_e) / 2.0
+                center = best_gap_center
+
+        txt = ax_dom.text(
             center, block_y + block_h / 2, display_label,
             ha="center", va="center", fontsize=fontsize, fontweight="bold",
             color=text_color, zorder=4, clip_on=True,
         )
+        txt.set_clip_path(rect)
 
     # ==================================================================
     # Track 2: Distance from membrane (abs value, ECD teal, non-ECD gray)
@@ -302,8 +347,7 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     # Legend
     # ==================================================================
     legend_patches = [
-        mpatches.Patch(color=PALETTE["teal"], label="InterPro Domain"),
-        mpatches.Patch(color=PALETTE["blue"], label="UniProt Domain"),
+        mpatches.Patch(color=PALETTE["teal"], label="Domain"),
         mpatches.Patch(color=COLOR_TRANSMEMBRANE, label="Transmembrane"),
         mpatches.Patch(color=PALETTE["mint"], label="Conserved / Specific"),
         mpatches.Patch(color=COLOR_MISMATCH, label="Mismatch / Non-specific"),
@@ -314,7 +358,19 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         frameon=True, fancybox=True,
     )
 
-    plt.tight_layout(rect=[0.14, 0.06, 1, 0.96])
+    # Filter parameters subtitle (under title)
+    from epitope_pipeline import config
+    if getattr(spatial_filter, "max_distance_threshold", None) is not None:
+        dist_str = "\u2264{:.0f}\u00c5 from membrane".format(spatial_filter.max_distance_threshold)
+    else:
+        dist_str = "\u2265{:.0f}\u00c5 from membrane".format(spatial_filter.min_distance_threshold)
+    cyno_pct = 100.0 - config.MAX_CYNO_MISMATCH_PERCENT
+    spec_pct = 100.0 - config.MAX_NONSPECIFIC_PERCENT
+    subtitle = "Filters: {} | SASA >{:.0f}% | \u2265{:.0f}% cyno conserved | \u2265{:.0f}% specific (scaled)".format(
+        dist_str, config.SURFACE_EXPOSURE_THRESHOLD * 100, cyno_pct, spec_pct)
+    fig.text(0.5, 0.895, subtitle, ha="center", fontsize=16, color="#888888", fontstyle="italic")
+
+    plt.tight_layout(rect=[0.14, 0.06, 1, 0.93])
 
     # Place y-axis labels AFTER tight_layout so axis positions are finalized
     _ylabel(ax_dom, "Domains")
@@ -408,10 +464,10 @@ def _collect_domain_blocks(target):
         "Signal": "#777777",
         "Transmembrane": COLOR_TRANSMEMBRANE,
         "Lipidation": COLOR_TRANSMEMBRANE,
-        "Domain": PALETTE["blue"],
+        "Domain": PALETTE["teal"],
         "Region": "#BBBBBB",
         "InterPro": PALETTE["teal"],
-        "Chain": PALETTE["blue"],
+        "Chain": PALETTE["teal"],
     }
     _ABBREV = {
         "Signal peptide": "SP", "Signal": "SP", "Transmembrane": "TM",

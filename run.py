@@ -460,7 +460,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     identifiers = sys.argv[1:]
-    results = run_pipeline(identifiers)
+    results = run_pipeline(identifiers, max_distance_a=config.PROXIMAL_MAX_DISTANCE_A)
 
     print("\nDone! Results in: {}".format(results["run_dir"]))
     for target in results.get("targets", []):
