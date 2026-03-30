@@ -63,7 +63,7 @@ if mode == "Single-target":
     )
     max_dist = st.sidebar.slider(
         "Max distance from membrane (\u00c5)",
-        min_value=20, max_value=120, value=40, step=5,
+        min_value=20, max_value=120, value=50, step=5,
         help="Find epitopes within this distance of the membrane (proximal mode)",
     )
 else:
@@ -79,7 +79,7 @@ else:
     )
     proximal_max = st.sidebar.slider(
         "Proximal max distance (\u00c5)",
-        min_value=20, max_value=80, value=40, step=5,
+        min_value=20, max_value=80, value=50, step=5,
     )
 
 st.sidebar.markdown("---")

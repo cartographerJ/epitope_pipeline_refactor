@@ -718,3 +718,183 @@ def _screen_patches_binary(ectodomain_patches, residue_identity_scores, seq_len)
             result[i] = None  # Not in any patch
 
     return result
+def _find_best_hit(blast_hits, patch_residue_numbers):
+    """Find the highest-identity BLAST hit overlapping the patch."""
+    patch_set = set(patch_residue_numbers)
+    best_hit = None
+    best_ident = 0.0
+    for hit in blast_hits:
+        if hit["identity"] > best_ident:
+            q_s = hit.get("query_start", 0)
+            q_e = hit.get("query_end", 0)
+            if any(q_s <= r <= q_e for r in patch_set):
+                best_ident = hit["identity"]
+                best_hit = hit
+    return best_hit or {
+        "accession": "unknown",
+        "identity": SPECIFICITY_IDENTITY_THRESHOLD,
+        "title": "off-target",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Whole-patch evaluation (NEW)
+# ---------------------------------------------------------------------------
+
+def evaluate_patch_specificity(patch, residue_specificity):
+    """
+    Evaluate a patch based on percentage of non-specific residues.
+
+    The threshold scales with patch size (same logic as conservation):
+
+        effective_threshold = min(base_threshold * sqrt(n_residues / 20), 30%)
+
+    Args:
+        patch: SurfacePatch object.
+        residue_specificity: Dict {resnum: bool or None} —
+            True=specific, False=non-specific, None=not assessed.
+
+    Returns:
+        Tuple (passes, nonspecific_percent, effective_threshold):
+            - passes: True if patch meets criteria.
+            - nonspecific_percent: Float percentage (0-100).
+            - effective_threshold: Size-adjusted threshold used (0-100).
+    """
+    import math
+
+    patch_set = set(patch.residue_numbers)
+    n_total = len(patch_set)
+
+    # Count assessed residues
+    n_assessed = sum(1 for r in patch_set
+                     if residue_specificity.get(r) is not None)
+
+    if n_assessed == 0:
+        # No BLAST data — pass by default
+        return True, 0.0, 0.0
+
+    # Count non-specific residues
+    n_nonspecific = sum(1 for r in patch_set
+                        if residue_specificity.get(r) is False)
+
+    nonspecific_percent = (n_nonspecific / n_total) * 100.0
+
+    # Scale threshold by patch size: sqrt(n/20) with 30% ceiling
+    effective_threshold = min(
+        config.MAX_NONSPECIFIC_PERCENT * math.sqrt(n_total / 20.0),
+        30.0,
+    )
+    passes = (nonspecific_percent <= effective_threshold)
+
+    return passes, nonspecific_percent, effective_threshold
+
+
+def merge_adjacent_patches(patches, distance_threshold_a=15.0):
+    """
+    Merge spatially adjacent patches into larger contiguous regions.
+
+    Uses centroid-based distance to identify adjacent patches, then merges
+    them into larger epitope regions. Patches within distance_threshold_a
+    of each other are merged.
+
+    Args:
+        patches: List of SurfacePatch objects.
+        distance_threshold_a: Distance threshold in Angstroms (default 15.0).
+
+    Returns:
+        List of merged SurfacePatch objects.
+    """
+    import numpy as np
+    from scipy.spatial.distance import pdist, squareform
+    from .surface import SurfacePatch
+
+    if len(patches) == 0:
+        return []
+
+    if len(patches) == 1:
+        return patches
+
+    # Calculate pairwise centroid distances
+    centroids = np.array([p.centroid for p in patches])
+    dist_matrix = squareform(pdist(centroids))
+
+    # Single-linkage clustering: merge patches within threshold
+    merged_groups = []
+    assigned = set()
+
+    for i, patch_i in enumerate(patches):
+        if i in assigned:
+            continue
+
+        # Start new group
+        group = [i]
+        assigned.add(i)
+
+        # Find all patches within threshold (transitively)
+        to_check = [i]
+        while to_check:
+            current = to_check.pop(0)
+            for j, patch_j in enumerate(patches):
+                if j in assigned:
+                    continue
+                if dist_matrix[current, j] <= distance_threshold_a:
+                    group.append(j)
+                    assigned.add(j)
+                    to_check.append(j)
+
+        merged_groups.append(group)
+
+    # Create merged patches
+    merged_patches = []
+    for group_idx, group in enumerate(merged_groups):
+        if len(group) == 1:
+            # Single patch, keep as-is
+            merged_patches.append(patches[group[0]])
+        else:
+            # Merge multiple patches
+            group_patches = [patches[i] for i in group]
+
+            # Combine residue numbers
+            all_residues = []
+            for p in group_patches:
+                all_residues.extend(p.residue_numbers)
+            merged_residues = sorted(set(all_residues))
+
+            # Combine residue AAs
+            merged_aas = {}
+            for p in group_patches:
+                merged_aas.update(p.residue_aas)
+
+            # Sum surface areas
+            total_sasa = sum(p.total_sasa_a2 for p in group_patches)
+
+            # Recalculate centroid (weighted by SASA)
+            weighted_centroid = sum(
+                p.centroid * p.total_sasa_a2 for p in group_patches
+            ) / total_sasa
+
+            # Recalculate max dimension
+            coords = np.array([p.centroid for p in group_patches])
+            max_dist = pdist(coords).max() if len(coords) > 1 else 0.0
+
+            # Average distance from membrane
+            avg_membrane_dist = np.mean([
+                p.avg_distance_from_membrane for p in group_patches
+            ])
+
+            # Create merged patch (use first patch's ID as base)
+            merged_patch = SurfacePatch(
+                patch_id=patches[group[0]].patch_id,
+                residue_numbers=merged_residues,
+                residue_aas=merged_aas,
+                total_sasa_a2=total_sasa,
+                centroid=weighted_centroid,
+                max_dimension_a=max_dist,
+                avg_distance_from_membrane=avg_membrane_dist,
+            )
+            merged_patches.append(merged_patch)
+
+    return merged_patches
+
+
+# ---------------------------------------------------------------------------

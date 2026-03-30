@@ -136,7 +136,7 @@ SCORE_WEIGHTS = {
 # Bispecific / dual-targeting thresholds
 # ---------------------------------------------------------------------------
 DISTAL_MIN_DISTANCE_A = 60.0         # Distal mode: ECD residues >= 60A
-PROXIMAL_MAX_DISTANCE_A = 40.0       # Proximal mode: ECD residues <= 40A
+PROXIMAL_MAX_DISTANCE_A = 50.0       # Proximal mode: ECD residues <= 50A
 FLEXIBILITY_BONUS = 1.20             # 20% bonus when BOTH orientations are valid
 DUAL_PML_GAP_A = 120.0              # X-axis translation gap between structures in dual PML
 
