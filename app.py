@@ -61,11 +61,16 @@ if mode == "Single-target":
         help="Gene names or UniProt IDs, one per line or comma-separated",
         height=120,
     )
-    max_dist = st.sidebar.slider(
-        "Max distance from membrane (\u00c5)",
-        min_value=20, max_value=120, value=50, step=5,
-        help="Find epitopes within this distance of the membrane (proximal mode)",
-    )
+    no_dist_filter = st.sidebar.checkbox("No distance filter", value=False,
+        help="Include all extracellular residues regardless of distance from membrane")
+    if not no_dist_filter:
+        max_dist = st.sidebar.slider(
+            "Max distance from membrane (\u00c5)",
+            min_value=20, max_value=120, value=50, step=5,
+            help="Find epitopes within this distance of the membrane (proximal mode)",
+        )
+    else:
+        max_dist = None
 else:
     target_text = st.sidebar.text_area(
         "Target pairs",
@@ -91,9 +96,9 @@ cyno_mismatch_pct = st.sidebar.slider(
 )
 
 nonspecific_pct = st.sidebar.slider(
-    "Max non-specific %",
-    min_value=5, max_value=50, value=15, step=5,
-    help="Max % non-specific residues to accept a patch (e.g., 15% = 3 non-specific in a 20-residue patch)",
+    "Max % shared with off-targets",
+    min_value=50, max_value=95, value=85, step=5,
+    help="Max % of patch residues that can be shared with off-target human proteins. Higher = more permissive. E.g., 85% = patch can share up to 85% of residues with a paralog (15% must be unique).",
 )
 
 with st.sidebar.expander("Advanced"):
@@ -151,7 +156,8 @@ if run_clicked:
                 from epitope_pipeline.run import run_pipeline
                 results = run_pipeline(
                     identifiers,
-                    max_distance_a=float(max_dist),
+                    max_distance_a=float(max_dist) if max_dist is not None else None,
+                    no_distance_filter=no_dist_filter,
                     cyno_mismatch_percent=float(cyno_mismatch_pct),
                     nonspecific_percent=float(nonspecific_pct),
                     force_experimental=force_experimental,

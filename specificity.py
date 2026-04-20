@@ -779,11 +779,8 @@ def evaluate_patch_specificity(patch, residue_specificity):
 
     nonspecific_percent = (n_nonspecific / n_total) * 100.0
 
-    # Scale threshold by patch size: sqrt(n/20) with 30% ceiling
-    effective_threshold = min(
-        config.MAX_NONSPECIFIC_PERCENT * math.sqrt(n_total / 20.0),
-        30.0,
-    )
+    # Flat threshold — no size-scaling
+    effective_threshold = config.MAX_NONSPECIFIC_PERCENT
     passes = (nonspecific_percent <= effective_threshold)
 
     return passes, nonspecific_percent, effective_threshold

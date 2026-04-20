@@ -96,8 +96,11 @@ VHH antibodies bind contiguous ~600 A² surface patches as atomic units. The CDR
 ### Default Thresholds
 
 - **Cyno conservation**: size-scaled threshold `min(base% * sqrt(n/20), 30%)`, base=`MAX_CYNO_MISMATCH_PERCENT` (default 15%)
-- **Human specificity**: same formula, base=`MAX_NONSPECIFIC_PERCENT` (default 15%)
+- **Human specificity (paralog homology)**: flat threshold — `MAX_NONSPECIFIC_PERCENT` (default 85%, i.e. up to 85% of patch residues may be shared with off-target paralogs; min 15% unique)
 - **Post-filtering merge**: 15Å centroid distance (`MERGE_DISTANCE_THRESHOLD_A`)
+
+**April 2026 update — paralog specificity:**
+The specificity filter was reframed from a "15% max non-specific, size-scaled" rule to a flat **85% max shared with off-targets** (or equivalently, min 15% unique). Size-scaling was removed for specificity because it inflated the effective threshold for large patches beyond what the literature supports. The 85% default is supported by empirical antibody data: an antibody footprint of ~15-25 residues with just 2-4 unique hot-spot contacts (Clackson & Wells, 1995) can be selective. The webapp slider now reads **"Max % shared with off-targets"** (50-95%, default 85%). Higher = more permissive.
 
 A 20-residue patch with 3 cyno mismatches = 15.0% → **PASS** (at threshold)
 A 25-residue patch with 4 cyno mismatches = 16.0% → **REJECT** (above threshold)

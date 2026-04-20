@@ -53,6 +53,7 @@ def run_pipeline(
     run_name=None,
     min_distance_a=None,
     max_distance_a=None,
+    no_distance_filter=False,
     cyno_max_mismatches=None,
     cyno_mismatch_percent=None,
     nonspecific_percent=None,
@@ -216,7 +217,12 @@ def run_pipeline(
         # =================================================================
         # Step 4: Ectodomain spatial filter
         # =================================================================
-        if max_distance_a is not None:
+        if no_distance_filter:
+            logger.info("\nStep 4: Ectodomain distance filter (OFF — all ECD residues)")
+            spatial = filter_ectodomain(target, structure, membrane,
+                                         no_distance_filter=True,
+                                         ca_coords=ca_coords)
+        elif max_distance_a is not None:
             logger.info("\nStep 4: Ectodomain distance filter (<= %.0fA, proximal)", max_distance_a)
             spatial = filter_ectodomain(target, structure, membrane,
                                          max_distance=max_distance_a,

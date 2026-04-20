@@ -194,7 +194,19 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
         if max_chars < 2:
             continue  # too small for any label
         fontsize = 16 if span < 80 else 20
-        display_label = label[:max_chars] + ".." if len(label) > max_chars else label
+        if len(label) > max_chars:
+            # If label ends with a number/suffix (e.g. "Cadherin 3"),
+            # truncate the middle to preserve the distinguishing part
+            import re
+            m = re.search(r'[\s-](\S+)$', label)
+            if m and len(m.group(1)) < max_chars - 3:
+                suffix = m.group(1)
+                avail = max_chars - len(suffix) - 2  # 2 for ".."
+                display_label = label[:max(1, avail)] + ".." + suffix if avail > 0 else label[:max_chars] + ".."
+            else:
+                display_label = label[:max_chars] + ".."
+        else:
+            display_label = label
 
         # Place text in the center of the largest visible gap
         if fcolor not in (COLOR_TRANSMEMBRANE,) and label not in ("TM", "SP", "GPI") and _tm_ranges:
@@ -249,14 +261,15 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     ax_dist.plot(positions, distances, color=PALETTE["teal"], linewidth=0.5, alpha=0.5)
 
     # Threshold line — proximal uses max_distance_threshold, distal uses min
+    # Skip when no distance filter is active
     if getattr(spatial_filter, "max_distance_threshold", None) is not None:
         thresh = spatial_filter.max_distance_threshold
-    else:
+        ax_dist.axhline(y=thresh, color=PALETTE["dark_purple"],
+                        linestyle="--", linewidth=2, alpha=0.7)
+    elif spatial_filter.min_distance_threshold > 0:
         thresh = spatial_filter.min_distance_threshold
-    ax_dist.axhline(
-        y=thresh, color=PALETTE["dark_purple"],
-        linestyle="--", linewidth=2, alpha=0.7,
-    )
+        ax_dist.axhline(y=thresh, color=PALETTE["dark_purple"],
+                        linestyle="--", linewidth=2, alpha=0.7)
     # y-label set after tight_layout
     ax_dist.tick_params(labelsize=20)
 
@@ -362,12 +375,13 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     from epitope_pipeline import config
     if getattr(spatial_filter, "max_distance_threshold", None) is not None:
         dist_str = "\u2264{:.0f}\u00c5 from membrane".format(spatial_filter.max_distance_threshold)
+    elif spatial_filter.min_distance_threshold == 0.0 and getattr(spatial_filter, "max_distance_threshold", None) is None:
+        dist_str = "no distance filter"
     else:
         dist_str = "\u2265{:.0f}\u00c5 from membrane".format(spatial_filter.min_distance_threshold)
     cyno_pct = 100.0 - config.MAX_CYNO_MISMATCH_PERCENT
-    spec_pct = 100.0 - config.MAX_NONSPECIFIC_PERCENT
-    subtitle = "Filters: {} | SASA >{:.0f}% | \u2265{:.0f}% cyno conserved | \u2265{:.0f}% specific (scaled)".format(
-        dist_str, config.SURFACE_EXPOSURE_THRESHOLD * 100, cyno_pct, spec_pct)
+    subtitle = "Filters: {} | SASA >{:.0f}% | \u2265{:.0f}% cyno conserved | \u2264{:.0f}% shared with off-targets".format(
+        dist_str, config.SURFACE_EXPOSURE_THRESHOLD * 100, cyno_pct, config.MAX_NONSPECIFIC_PERCENT)
     fig.text(0.5, 0.895, subtitle, ha="center", fontsize=16, color="#888888", fontstyle="italic")
 
     plt.tight_layout(rect=[0.14, 0.06, 1, 0.93])
@@ -379,6 +393,11 @@ def plot_epitope_map(target, membrane, spatial_filter, surface_analysis,
     _ylabel(ax_cons, "Cyno\nConserv.")
     _ylabel(ax_spec, "Human\nSpecific.")
     _ylabel(ax_patch, "Target\nEpitope")
+
+    # Timestamp
+    from datetime import datetime
+    fig.text(0.99, 0.01, datetime.now().strftime("%Y-%m-%d %H:%M"),
+             ha="right", va="bottom", fontsize=9, color="#AAAAAA")
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -642,6 +661,10 @@ def plot_scoring_summary(all_scores, target_metrics, targets, output_path,
 
     plt.tight_layout()
 
+    from datetime import datetime
+    fig.text(0.99, 0.01, datetime.now().strftime("%Y-%m-%d %H:%M"),
+             ha="right", va="bottom", fontsize=9, color="#AAAAAA")
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
@@ -764,6 +787,10 @@ def plot_blast_offtargets(target, specificity_result, output_path,
         ax.spines[spine].set_visible(False)
 
     plt.tight_layout()
+
+    from datetime import datetime
+    fig.text(0.99, 0.01, datetime.now().strftime("%Y-%m-%d %H:%M"),
+             ha="right", va="bottom", fontsize=9, color="#AAAAAA")
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

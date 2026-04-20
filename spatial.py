@@ -46,7 +46,7 @@ class SpatialFilter:
 # ---------------------------------------------------------------------------
 
 def filter_ectodomain(target, structure, membrane, min_distance=None,
-                      max_distance=None, ca_coords=None):
+                      max_distance=None, no_distance_filter=False, ca_coords=None):
     """
     Measure distance from the membrane plane for all residues in the
     structure, then isolate extracellular residues meeting the distance
@@ -71,7 +71,7 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
     Returns:
         SpatialFilter with qualifying residue list and distance data.
     """
-    if max_distance is None and min_distance is None:
+    if not no_distance_filter and max_distance is None and min_distance is None:
         min_distance = config.ECTODOMAIN_MIN_DISTANCE_A
 
     # Use pre-computed CA coords or extract from PDB
@@ -199,21 +199,22 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
             )
 
     # Filter to EXTRACELLULAR residues meeting distance criteria
-    if max_distance is not None:
-        # Proximal mode: extracellular residues <= max_distance
-        qualifying = [r for r, d in residue_distances.items()
-                      if d <= max_distance and r in extracellular_set]
-    else:
-        # Distal mode (default): extracellular residues >= min_distance
-        qualifying = [r for r, d in residue_distances.items()
-                      if d >= min_distance and r in extracellular_set]
-    qualifying.sort()
-
-    # Max distance of extracellular residues only (for logging)
     ecd_distances = [d for r, d in residue_distances.items() if r in extracellular_set]
     max_d = max(ecd_distances) if ecd_distances else 0.0
 
-    if max_distance is not None:
+    if no_distance_filter:
+        # All extracellular residues qualify
+        qualifying = sorted(r for r in residue_distances if r in extracellular_set)
+        logger.info(
+            "  %s: %d extracellular residues, all %d qualify (no distance filter)",
+            target.gene_name,
+            len(extracellular_residues),
+            len(qualifying),
+        )
+    elif max_distance is not None:
+        # Proximal mode: extracellular residues <= max_distance
+        qualifying = sorted(r for r, d in residue_distances.items()
+                            if d <= max_distance and r in extracellular_set)
         logger.info(
             "  %s: %d extracellular residues, %d qualify at <= %.0fA (proximal mode)",
             target.gene_name,
@@ -222,6 +223,9 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
             max_distance,
         )
     else:
+        # Distal mode (default): extracellular residues >= min_distance
+        qualifying = sorted(r for r, d in residue_distances.items()
+                            if d >= min_distance and r in extracellular_set)
         logger.info(
             "  %s: %d extracellular residues, %d qualify at >= %.0fA (max distance: %.1fA)",
             target.gene_name,

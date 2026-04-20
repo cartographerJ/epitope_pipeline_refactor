@@ -103,7 +103,7 @@ MAX_CYNO_MISMATCHES_PER_600A2 = 2       # Kept for backward compatibility only
 SPECIFICITY_IDENTITY_THRESHOLD = 0.7    # >70% identity -> non-specific residue
 
 # Whole-patch evaluation (NEW)
-MAX_NONSPECIFIC_PERCENT = 15.0          # Max % non-specific residues to accept patch
+MAX_NONSPECIFIC_PERCENT = 85.0          # Max % shared with off-targets (default 85% = min 15% unique)
 
 # DEPRECATED: Legacy sliding window threshold (not used in whole-patch mode)
 MAX_NONSPECIFIC_PER_600A2 = 2           # Kept for backward compatibility only
