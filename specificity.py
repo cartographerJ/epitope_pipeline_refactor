@@ -37,7 +37,6 @@ from epitope_pipeline.config import (
     LOCAL_BLAST_DB_PATH,
     MERGE_DISTANCE_THRESHOLD_A,
     RETRY_BLAST,
-    SPECIFICITY_IDENTITY_THRESHOLD,
     USE_LOCAL_BLAST,
 )
 
@@ -91,16 +90,24 @@ class SpecificityResult:
     uniprot_id: str
     gene_name: str
     specific_patches: list              # SurfacePatch objects passing specificity
-    rejected_patches: list              # [(patch, hit_protein_accession, identity), ...]
+    rejected_patches: list              # [(patch, worst_paralog_accession, worst_match_fraction), ...]
     unscreened_patches: list            # Patches where BLAST failed/timed out
     blast_results: dict                 # {patch_id: [hits]} for audit trail
     residue_specificity: dict = field(default_factory=dict)
-    # {resnum (1-based): bool or None — True=specific, False=non-specific
-    #  (in a >=600A² ectodomain patch with >=95% off-target), None=not assessed}
+    # {resnum (1-based): bool or None — True=unique (specific), False=at
+    #  least one paralog matches here (non-specific), None=not in any
+    #  assessed ectodomain patch}. Derived from paralog_matches.
     full_blast_hits: list = field(default_factory=list)
     # All HSPs from _blast_full_sequence() — one dict per HSP
-    residue_identity_scores: dict = field(default_factory=dict)
-    # {resnum (1-based): float} — max off-target HSP identity covering each position
+    paralog_matches: dict = field(default_factory=dict)
+    # {accession: set[int]} — for every paralog that passed the HSP quality
+    # floor (>=40% id, >=30 aa), the set of 1-based target residue positions
+    # where that paralog has the same amino acid as the target. This is the
+    # raw input to the patch-level per-paralog max-match-fraction rule.
+    patch_worst_paralog: dict = field(default_factory=dict)
+    # {patch_id: (accession, match_fraction)} — for each patch evaluated,
+    # the single worst paralog and its match fraction. match_fraction is in
+    # [0, 1].
 
 
 class SpecificityError(Exception):
@@ -152,29 +159,31 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
                 target.gene_name, len(target.sequence))
 
     full_hits = []
-    residue_identity_scores = {}
+    paralog_matches = {}
     try:
-        full_hits, residue_identity_scores = _blast_full_sequence(
+        full_hits, paralog_matches = _blast_full_sequence(
             target.sequence, target.uniprot_id,
             exclude_gene_name=target.gene_name,
         )
-        logger.info("  Full-sequence BLAST: %d off-target hits", len(full_hits))
+        logger.info(
+            "  Full-sequence BLAST: %d HSPs, %d paralogs above quality floor",
+            len(full_hits), len(paralog_matches),
+        )
     except Exception as e:
         logger.warning("  Full-sequence BLAST failed: %s — falling back to per-patch", e)
 
-    # Binary specificity from ectodomain 3D patches (FIXED: uses per-residue identity scores)
-    if ectodomain_patches and residue_identity_scores:
-        residue_specificity = _screen_patches_binary(
-            ectodomain_patches, residue_identity_scores, len(target.sequence),
-        )
+    # Derive the per-residue binary map (for figures/exports only — the
+    # pass/fail decision uses per-paralog fractions, not this map).
+    residue_specificity = _derive_residue_specificity(
+        paralog_matches, ectodomain_patches or [], len(target.sequence),
+    )
+    if ectodomain_patches:
         n_nonspec = sum(1 for v in residue_specificity.values() if v is False)
         n_assessed = sum(1 for v in residue_specificity.values() if v is not None)
         logger.info(
-            "  Ectodomain patch screen: %d/%d assessed residues non-specific (>=%.0f%% off-target)",
-            n_nonspec, n_assessed, SPECIFICITY_IDENTITY_THRESHOLD * 100,
+            "  Ectodomain surface: %d/%d residues shared with at least one paralog",
+            n_nonspec, n_assessed,
         )
-    else:
-        residue_specificity = {i: None for i in range(1, len(target.sequence) + 1)}
 
     # Step 2: Per-patch evaluation
     if not conservation_result.conserved_patches:
@@ -188,13 +197,14 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
             blast_results={},
             residue_specificity=residue_specificity,
             full_blast_hits=full_hits,
-            residue_identity_scores=residue_identity_scores,
+            paralog_matches=paralog_matches,
         )
 
     specific_patches = []
     rejected_patches = []
     unscreened_patches = []
     all_blast_results = {}
+    patch_worst_paralog = {}
 
     total = len(conservation_result.conserved_patches)
     for idx, patch in enumerate(conservation_result.conserved_patches):
@@ -229,27 +239,24 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
                 unscreened_patches.append(patch)
                 continue
 
-        # Whole-patch evaluation (threshold scales with patch size)
-        passes, nonspecific_pct, effective_thresh = evaluate_patch_specificity(patch, residue_specificity)
+        # Per-paralog max-match-fraction rule
+        passes, worst_pct, threshold, worst_acc = evaluate_patch_specificity(
+            patch, paralog_matches)
+        patch_worst_paralog[patch.patch_id] = (worst_acc, worst_pct / 100.0)
 
         if passes:
             specific_patches.append(patch)
             logger.info(
-                "    Patch %d: PASSED (%.1f%% non-specific <= %.1f%% threshold, %d residues)",
-                patch.patch_id, nonspecific_pct, effective_thresh, len(patch.residue_numbers),
+                "    Patch %d: PASSED (worst paralog %s @ %.1f%% <= %.1f%%, %d residues)",
+                patch.patch_id, worst_acc or "—", worst_pct, threshold,
+                len(patch.residue_numbers),
             )
         else:
-            offending = _find_best_hit(patch_hits, patch.residue_numbers)
-            rejected_patches.append((
-                patch,
-                offending["accession"],
-                offending["identity"],
-            ))
+            rejected_patches.append((patch, worst_acc, worst_pct / 100.0))
             logger.info(
-                "    Patch %d: REJECTED (%.1f%% non-specific > %.1f%% threshold, %d residues) — "
-                "%.1f%% identity with %s",
-                patch.patch_id, nonspecific_pct, effective_thresh, len(patch.residue_numbers),
-                offending["identity"] * 100, offending["accession"],
+                "    Patch %d: REJECTED (worst paralog %s @ %.1f%% > %.1f%%, %d residues)",
+                patch.patch_id, worst_acc or "—", worst_pct, threshold,
+                len(patch.residue_numbers),
             )
 
     # Step 7.5: Merge adjacent patches
@@ -293,7 +300,8 @@ def filter_specificity(target, conservation_result, ectodomain_patches=None,
         blast_results=all_blast_results,
         residue_specificity=residue_specificity,
         full_blast_hits=full_hits,
-        residue_identity_scores=residue_identity_scores,
+        paralog_matches=paralog_matches,
+        patch_worst_paralog=patch_worst_paralog,
     )
 
 
@@ -362,10 +370,13 @@ def _run_local_blast(sequence: str) -> str:
 
 def _blast_full_sequence(full_sequence, exclude_accession, exclude_gene_name=None):
     """
-    BLAST the full protein sequence and compute per-residue specificity.
+    BLAST the full protein sequence and return per-paralog match sets.
 
-    Walks through each HSP alignment character-by-character to determine
-    per-position identity with off-target proteins.
+    Walks each qualifying HSP alignment character-by-character and, for
+    every paralog, records the set of target residue positions where that
+    paralog has the SAME amino acid as the target. The patch-level
+    specificity filter then asks, per patch: does any single paralog match
+    more than MAX_NONSPECIFIC_PERCENT of the patch residues?
 
     Args:
         full_sequence: Full protein amino acid sequence.
@@ -376,8 +387,10 @@ def _blast_full_sequence(full_sequence, exclude_accession, exclude_gene_name=Non
     Returns:
         Tuple of:
           - hits: List of hit summary dicts (same format as _blast_sequence)
-          - residue_specificity: Dict {resnum: float} — max off-target HSP identity
-            (0.0 = no coverage, higher = more cross-reactivity risk)
+          - paralog_matches: Dict {accession: set[int]} — for each paralog
+            above the HSP quality floor (>=40% id, >=30 aa), the set of
+            1-based target residue positions where that paralog matches the
+            target amino acid exactly.
     """
     seq_hash = hashlib.md5(full_sequence.encode()).hexdigest()
     cache_path = CACHE_DIR / "blast" / "fullseq_{}.json".format(seq_hash)
@@ -386,9 +399,16 @@ def _blast_full_sequence(full_sequence, exclude_accession, exclude_gene_name=Non
         logger.debug("  Full-sequence BLAST cache hit")
         with open(cache_path) as f:
             cached = json.load(f)
-        hits = cached.get("hits", [])
-        residue_spec = {int(k): v for k, v in cached.get("residue_specificity", {}).items()}
-        return hits, residue_spec
+        # New cache format is keyed on "paralog_matches"; older caches keyed
+        # on "residue_specificity" are schema-incompatible and ignored.
+        if "paralog_matches" in cached:
+            hits = cached.get("hits", [])
+            paralog_matches = {
+                acc: set(positions)
+                for acc, positions in cached["paralog_matches"].items()
+            }
+            return hits, paralog_matches
+        logger.debug("  Cache schema mismatch — recomputing")
 
     from Bio.Blast import NCBIWWW, NCBIXML
 
@@ -428,11 +448,18 @@ def _blast_full_sequence(full_sequence, exclude_accession, exclude_gene_name=Non
             else:
                 raise
 
-    # Per-residue: track max off-target HSP identity covering each position.
-    # For each position, store the highest identity of any off-target HSP
-    # that spans it. Only consider HSPs with >=40% identity and >=30 aa
-    # alignment — below that is fold-level similarity, not cross-reactivity.
-    max_identity_at = {}  # {resnum: max_hsp_identity}
+    # Per-paralog match sets: {accession: set of 1-based positions where
+    # paralog AA matches target AA}. We walk qseq/sseq for every HSP that
+    # passes the quality floor (>=40% identity, >=30 aa alignment) to
+    # filter out fold-level noise (Ig-fold matches etc.) while keeping
+    # every credible paralog on the table for the patch-level decision.
+    paralog_matches = {}  # {accession: set[int]}
+
+    import re
+    self_gene_pattern = None
+    if exclude_gene_name:
+        self_gene_pattern = re.compile(
+            r'\b{}\b'.format(re.escape(exclude_gene_name.upper())))
 
     hits = []
     for alignment in record.alignments:
@@ -443,22 +470,17 @@ def _blast_full_sequence(full_sequence, exclude_accession, exclude_gene_name=Non
             continue
 
         # Skip self-hits by accession or gene name
-        is_self = False
         if exclude_accession and exclude_accession.upper() in title_upper:
-            is_self = True
-        if not is_self and exclude_gene_name:
-            import re
-            pattern = r'\b{}\b'.format(re.escape(exclude_gene_name.upper()))
-            if re.search(pattern, title_upper):
-                is_self = True
-        if is_self:
+            continue
+        if self_gene_pattern and self_gene_pattern.search(title_upper):
             continue
 
+        accession = alignment.accession
         for hsp in alignment.hsps:
             identity = hsp.identities / hsp.align_length if hsp.align_length > 0 else 0.0
 
             hits.append({
-                "accession": alignment.accession,
+                "accession": accession,
                 "title": alignment.title[:200],
                 "identity": identity,
                 "identities": hsp.identities,
@@ -468,38 +490,41 @@ def _blast_full_sequence(full_sequence, exclude_accession, exclude_gene_name=Non
                 "evalue": hsp.expect,
             })
 
-            # Only use meaningful alignments for per-residue mapping
-            # >=40% identity filters out structural fold noise (Ig-fold etc.)
-            # >=30 aa avoids spurious short matches
+            # Quality floor: skip HSPs that are too divergent or too short
+            # to meaningfully inform a cross-reactivity decision.
             if identity < 0.40 or hsp.align_length < 30:
                 continue
 
-            # Mark every query position spanned by this HSP with its identity
-            query_pos = hsp.query_start  # 1-based
-            for q_char in hsp.query:
-                if q_char != "-":
-                    if identity > max_identity_at.get(query_pos, 0.0):
-                        max_identity_at[query_pos] = identity
-                    query_pos += 1
+            # Walk aligned pair position-by-position. query_pos is 1-based
+            # in the full target sequence. A gap in the query doesn't
+            # consume a target position; a gap in the subject is just a
+            # non-match at that target position.
+            matched = paralog_matches.setdefault(accession, set())
+            query_pos = hsp.query_start
+            for q_char, s_char in zip(hsp.query, hsp.sbjct):
+                if q_char == "-":
+                    continue
+                if s_char != "-" and q_char.upper() == s_char.upper():
+                    matched.add(query_pos)
+                query_pos += 1
 
-    # Build per-residue map: 0.0 = no off-target coverage, float = max identity
-    residue_specificity = {}
-    for resnum in range(1, len(full_sequence) + 1):
-        residue_specificity[resnum] = max_identity_at.get(resnum, 0.0)
-
-    # Cache — but skip caching if 0 hits for a large protein (likely transient NCBI failure)
+    # Cache — but skip caching if 0 hits for a large protein (likely
+    # transient NCBI failure). Sets serialize as sorted lists.
     if hits or len(full_sequence) < 100:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         with open(cache_path, "w") as f:
             json.dump({
                 "hits": hits,
-                "residue_specificity": {str(k): v for k, v in residue_specificity.items()},
+                "paralog_matches": {
+                    acc: sorted(positions)
+                    for acc, positions in paralog_matches.items()
+                },
             }, f, indent=2)
     else:
         logger.warning("  BLAST returned 0 hits for %d aa protein — not caching (likely transient)",
                         len(full_sequence))
 
-    return hits, residue_specificity
+    return hits, paralog_matches
 
 
 def _filter_hits_to_patch(full_hits, patch_residue_numbers):
@@ -681,45 +706,94 @@ def _blast_sequence(query_sequence, exclude_accession=None):
 
 
 # ---------------------------------------------------------------------------
-# Binary specificity screening (ectodomain 3D patches)
+# Per-paralog patch specificity
 # ---------------------------------------------------------------------------
 
-def _screen_patches_binary(ectodomain_patches, residue_identity_scores, seq_len):
+def evaluate_patch_specificity(patch, paralog_matches):
     """
-    Screen ectodomain patches using per-residue BLAST identity scores.
+    Evaluate a patch by per-paralog match fraction.
 
-    FIXED: Uses actual per-residue identity scores from BLAST, not HSP ranges.
-    A residue is "non-specific" if its identity to any human protein is
-    >= SPECIFICITY_IDENTITY_THRESHOLD.
+    For each paralog that passed the HSP quality floor in BLAST, compute
+    what fraction of the patch residues it matches exactly. The patch
+    fails if any single paralog matches more than MAX_NONSPECIFIC_PERCENT
+    of the patch — because an antibody raised to that patch surface would
+    cross-react with the matching paralog.
+
+    Rationale: cross-reactivity is a per-paralog problem. An antibody
+    cross-reacts with a specific off-target protein, not a chimera of all
+    paralogs. Taking the max over paralogs gives each paralog an
+    independent veto while averaging across paralogs would let one
+    near-identical off-target hide behind several distant ones.
 
     Args:
-        ectodomain_patches: List of SurfacePatch objects (all exposed ectodomain).
-        residue_identity_scores: Dict {resnum: float} — max BLAST identity per residue.
-        seq_len: Total sequence length.
+        patch: SurfacePatch object.
+        paralog_matches: Dict {accession: set[int]} — for each paralog,
+            the set of target residues it matches exactly. From
+            _blast_full_sequence().
 
     Returns:
-        Dict {resnum: bool or None} — True=specific, False=non-specific,
-        None=not in any assessed patch.
+        Tuple (passes, worst_match_percent, threshold, worst_paralog):
+            - passes: True if max-over-paralogs match fraction <= threshold.
+            - worst_match_percent: Float 0-100 — worst paralog's match %.
+            - threshold: MAX_NONSPECIFIC_PERCENT (0-100).
+            - worst_paralog: Accession of the worst paralog (or None).
     """
-    # Collect all assessed residues (those in any ectodomain patch)
+    patch_set = set(patch.residue_numbers)
+    n_total = len(patch_set)
+    threshold = config.MAX_NONSPECIFIC_PERCENT
+
+    if n_total == 0 or not paralog_matches:
+        return True, 0.0, threshold, None
+
+    worst_acc = None
+    worst_frac = 0.0
+    for accession, matched_positions in paralog_matches.items():
+        frac = len(patch_set & matched_positions) / n_total
+        if frac > worst_frac:
+            worst_frac = frac
+            worst_acc = accession
+
+    worst_percent = worst_frac * 100.0
+    passes = worst_percent <= threshold
+    return passes, worst_percent, threshold, worst_acc
+
+
+def _derive_residue_specificity(paralog_matches, ectodomain_patches, seq_len):
+    """
+    Build the per-residue binary specificity map used by figures/exports.
+
+    A residue is marked:
+      - True  (specific)     — in an assessed patch, no paralog matches here
+      - False (non-specific) — in an assessed patch, at least one paralog matches
+      - None  (not assessed) — outside any ectodomain surface patch
+
+    This is purely for visualization/reporting — the pass/fail decision
+    comes from evaluate_patch_specificity's per-paralog max fraction,
+    not from aggregating these flags.
+    """
     assessed = set()
-    for patch in ectodomain_patches:
+    for patch in ectodomain_patches or []:
         assessed.update(patch.residue_numbers)
 
-    # Build per-residue binary map using identity scores
+    any_paralog_matches = set()
+    for positions in paralog_matches.values():
+        any_paralog_matches.update(positions)
+
     result = {}
     for i in range(1, seq_len + 1):
-        if i in assessed:
-            identity = residue_identity_scores.get(i, 0.0)
-            # True = specific (identity < threshold)
-            # False = non-specific (identity >= threshold)
-            result[i] = (identity < SPECIFICITY_IDENTITY_THRESHOLD)
+        if i not in assessed:
+            result[i] = None
         else:
-            result[i] = None  # Not in any patch
-
+            result[i] = i not in any_paralog_matches
     return result
+
+
 def _find_best_hit(blast_hits, patch_residue_numbers):
-    """Find the highest-identity BLAST hit overlapping the patch."""
+    """Find the highest-identity BLAST hit overlapping the patch.
+
+    Used only for the rejection-message annotation — tells the user which
+    off-target hit most clearly explains why the patch failed.
+    """
     patch_set = set(patch_residue_numbers)
     best_hit = None
     best_ident = 0.0
@@ -732,58 +806,9 @@ def _find_best_hit(blast_hits, patch_residue_numbers):
                 best_hit = hit
     return best_hit or {
         "accession": "unknown",
-        "identity": SPECIFICITY_IDENTITY_THRESHOLD,
+        "identity": 0.0,
         "title": "off-target",
     }
-
-
-# ---------------------------------------------------------------------------
-# Whole-patch evaluation (NEW)
-# ---------------------------------------------------------------------------
-
-def evaluate_patch_specificity(patch, residue_specificity):
-    """
-    Evaluate a patch based on percentage of non-specific residues.
-
-    The threshold scales with patch size (same logic as conservation):
-
-        effective_threshold = min(base_threshold * sqrt(n_residues / 20), 30%)
-
-    Args:
-        patch: SurfacePatch object.
-        residue_specificity: Dict {resnum: bool or None} —
-            True=specific, False=non-specific, None=not assessed.
-
-    Returns:
-        Tuple (passes, nonspecific_percent, effective_threshold):
-            - passes: True if patch meets criteria.
-            - nonspecific_percent: Float percentage (0-100).
-            - effective_threshold: Size-adjusted threshold used (0-100).
-    """
-    import math
-
-    patch_set = set(patch.residue_numbers)
-    n_total = len(patch_set)
-
-    # Count assessed residues
-    n_assessed = sum(1 for r in patch_set
-                     if residue_specificity.get(r) is not None)
-
-    if n_assessed == 0:
-        # No BLAST data — pass by default
-        return True, 0.0, 0.0
-
-    # Count non-specific residues
-    n_nonspecific = sum(1 for r in patch_set
-                        if residue_specificity.get(r) is False)
-
-    nonspecific_percent = (n_nonspecific / n_total) * 100.0
-
-    # Flat threshold — no size-scaling
-    effective_threshold = config.MAX_NONSPECIFIC_PERCENT
-    passes = (nonspecific_percent <= effective_threshold)
-
-    return passes, nonspecific_percent, effective_threshold
 
 
 def merge_adjacent_patches(patches, distance_threshold_a=15.0):

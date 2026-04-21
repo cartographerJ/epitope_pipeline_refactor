@@ -90,7 +90,6 @@ def run_bispecific(
     distal_min_distance_a=None,
     proximal_max_distance_a=None,
     cyno_max_mismatches=None,
-    specificity_threshold=None,
     cyno_mismatch_percent=None,
     nonspecific_percent=None,
     force_experimental=False,
@@ -105,7 +104,6 @@ def run_bispecific(
         distal_min_distance_a: Override distal threshold (default 60A).
         proximal_max_distance_a: Override proximal threshold (default 40A).
         cyno_max_mismatches: Override max cyno mismatches per 600A² (default 2) [DEPRECATED].
-        specificity_threshold: Override specificity threshold [DEPRECATED].
         cyno_mismatch_percent: Override cyno mismatch percent threshold (default 15.0).
         nonspecific_percent: Override nonspecific percent threshold (default 15.0).
         force_experimental: Use experimental PDB instead of AlphaFold.
@@ -126,8 +124,6 @@ def run_bispecific(
     # Apply legacy threshold overrides (deprecated)
     if cyno_max_mismatches is not None:
         config.MAX_CYNO_MISMATCHES_PER_600A2 = cyno_max_mismatches
-    if specificity_threshold is not None:
-        config.SPECIFICITY_IDENTITY_THRESHOLD = specificity_threshold
 
     # --- Setup logging ---
     setup_logging(verbose)
@@ -365,8 +361,7 @@ def run_bispecific(
         "cyno_mismatch_percent_base": config.MAX_CYNO_MISMATCH_PERCENT,
         "cyno_mismatch_scaling": "min(base% * sqrt(n_residues/20), 30%)",
         "nonspecific_percent_base": config.MAX_NONSPECIFIC_PERCENT,
-        "nonspecific_scaling": "min(base% * sqrt(n_residues/20), 30%)",
-        "specificity_identity_threshold": config.SPECIFICITY_IDENTITY_THRESHOLD,
+        "nonspecific_rule": "worst single paralog match fraction <= nonspecific_percent_base",
         "vhh_footprint_min_a2": config.VHH_FOOTPRINT_MIN_A2,
         "flexibility_bonus": config.FLEXIBILITY_BONUS,
     }

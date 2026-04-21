@@ -187,15 +187,14 @@ def _score_patch(patch, target, conservation_result, specificity_result,
     conservation_score = cyno_identity
 
     # --- Specificity score ---
-    # Per-residue: mean off-target identity across patch residues
-    max_off_target = 0.0
-    if specificity_result.residue_identity_scores:
-        patch_identities = [
-            specificity_result.residue_identity_scores.get(r, 0.0)
-            for r in patch.residue_numbers
-        ]
-        max_off_target = max(patch_identities) if patch_identities else 0.0
-    specificity_score = 1.0 - max_off_target
+    # Worst single paralog's match fraction within the patch. Stored by
+    # filter_specificity when the patch was evaluated.
+    worst_match_fraction = 0.0
+    if specificity_result.patch_worst_paralog:
+        entry = specificity_result.patch_worst_paralog.get(patch.patch_id)
+        if entry is not None:
+            worst_match_fraction = entry[1]  # (accession, fraction)
+    specificity_score = 1.0 - worst_match_fraction
 
     # --- Accessibility score ---
     # Average relative SASA of patch residues
@@ -231,7 +230,7 @@ def _score_patch(patch, target, conservation_result, specificity_result,
         patch_area_a2=area,
         avg_distance_a=avg_dist,
         cyno_identity=cyno_identity,
-        max_off_target_identity=max_off_target,
+        max_off_target_identity=worst_match_fraction,
         avg_relative_sasa=avg_rel_sasa,
         n_residues=len(patch.residue_numbers),
         residue_range=residue_range,

@@ -37,8 +37,7 @@ results = run_pipeline(
     ["ERBB2"],
     min_distance_a=60.0,                # Override 80A default
     max_cyno_mismatch_percent=20.0,     # Override 15% default (more permissive)
-    max_nonspecific_percent=20.0,       # Override 15% default (more permissive)
-    specificity_threshold=0.75,         # Override 0.70 default (stricter off-target identity)
+    nonspecific_percent=80.0,           # Override 85% default (stricter — min 20% unique)
     force_experimental=True,            # Use experimental PDB instead of AlphaFold DB
 )
 ```
@@ -96,11 +95,13 @@ VHH antibodies bind contiguous ~600 A² surface patches as atomic units. The CDR
 ### Default Thresholds
 
 - **Cyno conservation**: size-scaled threshold `min(base% * sqrt(n/20), 30%)`, base=`MAX_CYNO_MISMATCH_PERCENT` (default 15%)
-- **Human specificity (paralog homology)**: flat threshold — `MAX_NONSPECIFIC_PERCENT` (default 85%, i.e. up to 85% of patch residues may be shared with off-target paralogs; min 15% unique)
+- **Human specificity (paralog homology)**: per-paralog patch rule — a patch fails if **any single paralog** matches more than `MAX_NONSPECIFIC_PERCENT` of the patch residues (default 85%, i.e. min 15% unique relative to every paralog individually).
 - **Post-filtering merge**: 15Å centroid distance (`MERGE_DISTANCE_THRESHOLD_A`)
 
-**April 2026 update — paralog specificity:**
-The specificity filter was reframed from a "15% max non-specific, size-scaled" rule to a flat **85% max shared with off-targets** (or equivalently, min 15% unique). Size-scaling was removed for specificity because it inflated the effective threshold for large patches beyond what the literature supports. The 85% default is supported by empirical antibody data: an antibody footprint of ~15-25 residues with just 2-4 unique hot-spot contacts (Clackson & Wells, 1995) can be selective. The webapp slider now reads **"Max % shared with off-targets"** (50-95%, default 85%). Higher = more permissive.
+**April 2026 update — per-paralog specificity:**
+Cross-reactivity is a per-paralog problem: an antibody binds a specific off-target protein, not a chimera of all paralogs. The filter walks each qualifying BLAST HSP (≥40% identity, ≥30 aa) character-by-character and builds, for every paralog, the exact set of target residues where that paralog has the same amino acid. Per patch, it then computes each paralog's match fraction and takes the max. The patch fails if the worst single paralog matches more than 85% of the patch.
+
+This replaces the prior "max HSP identity per residue" aggregate, which had two weaknesses: it used HSP-average identity (tagging every residue under an 82% HSP as 82% non-specific, even the 18% that actually mismatched), and it erased per-paralog identity (you couldn't tell which off-target was the liability). For paralog-heavy families (protocadherins, CEACAMs, claudins) the per-paralog view finds real sub-patches the old rule missed and names the worst off-target for each patch verdict.
 
 A 20-residue patch with 3 cyno mismatches = 15.0% → **PASS** (at threshold)
 A 25-residue patch with 4 cyno mismatches = 16.0% → **REJECT** (above threshold)
@@ -166,7 +167,7 @@ The `Supplementary Files/BLAST/` directory contains two files per target for ful
 - `specific` — identity < 70% but passes pre-filter (>= 40% identity, >= 30aa)
 - `filtered` — below pre-filter thresholds, not used for scoring
 
-**`{gene}_blast_specificity.csv`** — One row per residue in the target sequence. Shows the max off-target identity at each position, which protein drives that score, and the final binary call (specific/non-specific/not_assessed) against the 70% threshold.
+**`{gene}_blast_specificity.csv`** — One row per residue in the target sequence. Shows the highest-identity HSP covering each position (for context), which off-target drives it, and whether at least one paralog matches the target amino acid exactly at that position (`paralog_matches_here` column: yes / none / not_assessed).
 
 ### Annotated PDB Scoring Scheme
 
@@ -210,9 +211,8 @@ All thresholds are defined in `config.py` and can be overridden via `run_pipelin
 | `RESOLUTION_THRESHOLD_A` | 3.5 | Max PDB resolution accepted |
 | `VHH_FOOTPRINT_MIN_A2` | 600.0 | Min surface patch area (A²) |
 | `MAX_CYNO_MISMATCH_PERCENT` | 15.0 | Base % cyno mismatches (scales with patch size: `min(base * sqrt(n/20), 30%)`) |
-| `MAX_NONSPECIFIC_PERCENT` | 15.0 | Base % non-specific residues (same scaling formula) |
+| `MAX_NONSPECIFIC_PERCENT` | 85.0 | Max % of a patch that may match any single paralog (per-paralog rule) |
 | `MERGE_DISTANCE_THRESHOLD_A` | 15.0 | Merge patches with centroids within 15Å (post-filtering) |
-| `SPECIFICITY_IDENTITY_THRESHOLD` | 0.70 | Off-target BLAST identity for marking residues as non-specific |
 | `PATCH_CLUSTERING_DISTANCE_A` | 8.0 | Cα-Cα distance for patch connectivity |
 | `MIN_ECTODOMAIN_COVERAGE` | 0.80 | Min PDB ectodomain coverage (applies when `force_experimental=True`) |
 | `MAX_CYNO_MISMATCHES_PER_600A2` | 2 | **DEPRECATED** — Legacy sliding window threshold (not used) |

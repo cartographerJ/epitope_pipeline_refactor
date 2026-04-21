@@ -41,7 +41,8 @@ def plot_specificity_diagnostics(
         patches_before_trim: List of SurfacePatch objects before trimming.
         patches_after_trim: List of SurfacePatch objects after trimming.
         window_counts: Dict {resnum: int} — count of non-specific residues in window.
-        threshold: SPECIFICITY_IDENTITY_THRESHOLD (e.g., 0.70).
+        threshold: Per-residue HSP identity threshold (legacy; the main
+            pipeline now uses per-paralog patch match fractions).
         max_nonspecific_per_window: MAX_NONSPECIFIC_PER_600A2 (e.g., 2).
         output_dir: Path to save diagnostic plots.
     """
@@ -195,7 +196,7 @@ def plot_specificity_comparison(
         residue_identity: Dict {resnum: float} — BLAST identity scores.
         patches_old_method: Patches from old HSP-range method.
         patches_new_method: Patches from new per-residue method.
-        threshold: SPECIFICITY_IDENTITY_THRESHOLD.
+        threshold: Per-residue HSP identity threshold (legacy).
         output_dir: Path to save comparison plot.
     """
     output_dir = Path(output_dir)

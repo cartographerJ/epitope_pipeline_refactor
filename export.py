@@ -29,7 +29,6 @@ from epitope_pipeline.config import (
     COLOR_MISMATCH,
     COLOR_TRANSMEMBRANE,
     PALETTE,
-    SPECIFICITY_IDENTITY_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,12 +179,9 @@ def export_blast_details(blast_dir, target, specificity_result):
     gene = target.gene_name
 
     hits = specificity_result.full_blast_hits
-    id_scores = specificity_result.residue_identity_scores
     res_spec = specificity_result.residue_specificity
-    if not id_scores and not res_spec:
+    if not hits and not res_spec:
         return
-
-    threshold_pct = SPECIFICITY_IDENTITY_THRESHOLD * 100
 
     # --- HSP summary table ---------------------------------------------------
     if hits:
@@ -195,7 +191,7 @@ def export_blast_details(blast_dir, target, specificity_result):
             writer = csv.writer(f)
             writer.writerow([
                 "off_target", "accession", "hsp_range", "hsp_length",
-                "identical_positions", "identity_pct", "evalue", "call",
+                "identical_positions", "identity_pct", "evalue", "included",
             ])
             for h in sorted_hits:
                 ident = h.get("identity", 0.0)
@@ -209,19 +205,18 @@ def export_blast_details(blast_dir, target, specificity_result):
                     parts = title.split("|")
                     if len(parts) >= 3:
                         short_name = parts[2].split(" OS=")[0]
+                # Quality floor for per-paralog evaluation
                 if ident < 0.40 or alen < 30:
-                    call = "filtered (<40% or <30aa)"
-                elif ident >= SPECIFICITY_IDENTITY_THRESHOLD:
-                    call = "non-specific"
+                    included = "no (below 40% id / 30 aa floor)"
                 else:
-                    call = "specific"
+                    included = "yes"
                 writer.writerow([
                     short_name, h.get("accession", ""),
                     f"{qs}-{qe}", alen,
                     h.get("identities", ""),
                     f"{ident * 100:.1f}",
                     f"{h.get('evalue', 0):.2e}",
-                    call,
+                    included,
                 ])
         logger.info("  Wrote %d BLAST HSPs to %s", len(sorted_hits), hsps_path.name)
 
@@ -245,13 +240,13 @@ def export_blast_details(blast_dir, target, specificity_result):
     with open(out_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "residue_num", "aa", "max_off_target_identity_pct",
+            "residue_num", "aa", "top_hsp_identity_pct",
             "top_hit_accession", "top_hit_protein",
-            "specific", "threshold_pct",
+            "paralog_matches_here",
         ])
         for i, aa in enumerate(target.sequence, 1):
-            max_id = id_scores.get(i, 0.0)
             top = residue_top_hit.get(i)
+            top_id_pct = (top[0] * 100) if top else 0.0
             acc = top[1] if top else ""
             prot = top[2] if top else ""
             # Trim sp|...|NAME_HUMAN ... to just the gene-level name
@@ -261,14 +256,13 @@ def export_blast_details(blast_dir, target, specificity_result):
                     prot = parts[2].split(" OS=")[0]  # e.g. "EGFR_HUMAN Epidermal growth factor receptor"
             spec_val = res_spec.get(i)
             if spec_val is True:
-                call = "yes"
+                call = "none"
             elif spec_val is False:
-                call = "no"
+                call = "yes"
             else:
                 call = "not_assessed"
             writer.writerow([
-                i, aa, f"{max_id * 100:.1f}", acc, prot,
-                call, f"{threshold_pct:.0f}",
+                i, aa, f"{top_id_pct:.1f}", acc, prot, call,
             ])
     logger.info("  Wrote %d residue BLAST details to %s",
                  len(target.sequence), out_path.name)

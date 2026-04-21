@@ -100,13 +100,10 @@ MAX_CYNO_MISMATCHES_PER_600A2 = 2       # Kept for backward compatibility only
 # ---------------------------------------------------------------------------
 # Specificity (BLAST)
 # ---------------------------------------------------------------------------
-SPECIFICITY_IDENTITY_THRESHOLD = 0.7    # >70% identity -> non-specific residue
-
-# Whole-patch evaluation (NEW)
-MAX_NONSPECIFIC_PERCENT = 85.0          # Max % shared with off-targets (default 85% = min 15% unique)
-
-# DEPRECATED: Legacy sliding window threshold (not used in whole-patch mode)
-MAX_NONSPECIFIC_PER_600A2 = 2           # Kept for backward compatibility only
+# Per-paralog patch rule: a patch fails if any single paralog matches
+# more than MAX_NONSPECIFIC_PERCENT of the patch residues. HSPs below
+# 40% identity or 30 aa alignment are filtered out before counting.
+MAX_NONSPECIFIC_PERCENT = 85.0          # Max % of patch that can match any single paralog
 
 # Post-filtering merge
 MERGE_DISTANCE_THRESHOLD_A = 15.0       # Merge patches with centroids within 15Å
