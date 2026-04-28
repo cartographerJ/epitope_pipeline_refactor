@@ -605,7 +605,7 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
     if (membrane and spatial_filter
             and getattr(spatial_filter, 'anchor_resnum', None) is not None
             and getattr(spatial_filter, 'farthest_resnum', None) is not None):
-        from epitope_pipeline.utils import extract_ca_coords as _extract_ca
+        from epitope_pipeline.io.pdb import extract_ca_coords as _extract_ca
         _ca = _extract_ca(structure.pdb_path, structure.chain_id)
         _a = _ca.get(spatial_filter.anchor_resnum)
         _f = _ca.get(spatial_filter.farthest_resnum)
@@ -635,7 +635,7 @@ def export_annotated_pdb(run_dir, target, structure, membrane,
         ec_residues = [r for r, t in membrane.residue_topology.items()
                        if t == "extracellular"]
         if ec_residues:
-            from epitope_pipeline.utils import extract_ca_coords as _extract_ca
+            from epitope_pipeline.io.pdb import extract_ca_coords as _extract_ca
             _ca_mp = _extract_ca(structure.pdb_path, structure.chain_id)
             ec_coords = [_ca_mp[r] for r in ec_residues if r in _ca_mp]
             if ec_coords:
@@ -851,7 +851,7 @@ def generate_membrane_cgo_pml(membrane, pdb_path, chain_id,
     Returns:
         List of PML lines to insert into a .pml script.
     """
-    from epitope_pipeline.utils import extract_ca_coords
+    from epitope_pipeline.io.pdb import extract_ca_coords
 
     center = np.asarray(center_override, dtype=float) if center_override is not None else membrane.membrane_center
     normal = np.asarray(normal_override, dtype=float) if normal_override is not None else membrane.membrane_normal
@@ -1036,7 +1036,7 @@ def generate_shared_membrane_cgo_pml(membrane_a, pdb_path_a, chain_a,
     Returns:
         List of PML lines to insert into a .pml script.
     """
-    from epitope_pipeline.utils import extract_ca_coords
+    from epitope_pipeline.io.pdb import extract_ca_coords
 
     center_a = np.array(membrane_a.membrane_center, dtype=float)
     normal_a = np.array(membrane_a.membrane_normal, dtype=float)
@@ -1322,7 +1322,7 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
 
     # Hide cleaved regions: signal peptide + GPI anchor signal
     if membrane:
-        from epitope_pipeline.membrane import _extract_signal_peptide_end
+        from epitope_pipeline.io.membrane import _extract_signal_peptide_end
         sp_end = _extract_signal_peptide_end(target.features)
         if sp_end > 0:
             lines.append("# --- Hide signal peptide (cleaved, residues 1-{}) ---".format(sp_end))
@@ -1501,7 +1501,7 @@ def _write_pymol_script(run_dir, target, structure, membrane, spatial_filter,
         mem_center = np.array(membrane.membrane_center)
         ec_residues = [r for r, t in membrane.residue_topology.items() if t == "extracellular"]
         if ec_residues:
-            from epitope_pipeline.utils import extract_ca_coords
+            from epitope_pipeline.io.pdb import extract_ca_coords
             ca = extract_ca_coords(structure.pdb_path, structure.chain_id)
             ec_coords = [ca[r] for r in ec_residues if r in ca]
             if ec_coords:

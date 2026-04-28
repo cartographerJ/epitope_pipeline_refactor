@@ -15,7 +15,7 @@ import numpy as np
 from Bio.PDB import PDBParser
 
 from epitope_pipeline import config
-from epitope_pipeline.utils import get_chain
+from epitope_pipeline.io.pdb import get_chain
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
 
     # Use pre-computed CA coords or extract from PDB
     if ca_coords is None:
-        from epitope_pipeline.utils import extract_ca_coords
+        from epitope_pipeline.io.pdb import extract_ca_coords
         ca_coords = extract_ca_coords(structure.pdb_path, structure.chain_id)
 
     # Also need to iterate the chain for topology classification
@@ -115,7 +115,7 @@ def filter_ectodomain(target, structure, membrane, min_distance=None,
     # them from distances so they don't produce artificial spikes.
     sp_end = getattr(membrane, '_sp_end', 0) or 0
     if sp_end == 0 and hasattr(target, 'features'):
-        from epitope_pipeline.membrane import _extract_signal_peptide_end
+        from epitope_pipeline.io.membrane import _extract_signal_peptide_end
         sp_end = _extract_signal_peptide_end(target.features)
     # GPI anchor: residues after omega site are cleaved
     gpi_start = None

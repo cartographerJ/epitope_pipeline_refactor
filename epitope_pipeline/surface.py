@@ -24,7 +24,7 @@ from epitope_pipeline.config import (
     SURFACE_EXPOSURE_THRESHOLD,
     VHH_FOOTPRINT_MIN_A2,
 )
-from epitope_pipeline.utils import get_chain, extract_ca_coords
+from epitope_pipeline.io.pdb import get_chain, extract_ca_coords
 
 logger = logging.getLogger(__name__)
 

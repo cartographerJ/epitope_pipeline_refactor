@@ -26,18 +26,19 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from epitope_pipeline import config
-from epitope_pipeline.utils import extract_ca_coords, setup_logging, empty_metric
-from epitope_pipeline.target_input import resolve_targets, TargetResolutionError
-from epitope_pipeline.structure import (
+from epitope_pipeline.utils import setup_logging, empty_metric
+from epitope_pipeline.io.pdb import extract_ca_coords
+from epitope_pipeline.io.targets import resolve_targets, TargetResolutionError
+from epitope_pipeline.io.structure import (
     acquire_structure, StructureAcquisitionError,
 )
-from epitope_pipeline.membrane import annotate_membrane, MembraneAnnotationError
+from epitope_pipeline.io.membrane import annotate_membrane, MembraneAnnotationError
 from epitope_pipeline.spatial import filter_ectodomain
 from epitope_pipeline.surface import analyze_surface, cluster_ectodomain_patches
 from epitope_pipeline.conservation import analyze_conservation, ConservationError
 from epitope_pipeline.specificity import filter_specificity
 from epitope_pipeline.scoring import score_epitopes, compute_target_epitope_metric
-from epitope_pipeline.export import export_all
+from epitope_pipeline.io.export import export_all
 from epitope_pipeline.visualize import plot_epitope_map, plot_scoring_summary, plot_blast_offtargets
 
 

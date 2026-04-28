@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from epitope_pipeline.config import PALETTE, DUAL_PML_GAP_A
-from epitope_pipeline.export import (
+from epitope_pipeline.io.export import (
     export_annotated_pdb,
     export_blast_details,
     generate_membrane_cgo_pml,
@@ -465,7 +465,7 @@ def export_bispecific_pml(run_dir, pair_result, orientation,
 
         # Hide cleaved regions: signal peptide + GPI anchor signal
         if zone.membrane:
-            from epitope_pipeline.membrane import _extract_signal_peptide_end
+            from epitope_pipeline.io.membrane import _extract_signal_peptide_end
             sp_end = _extract_signal_peptide_end(zone.target.features)
             if sp_end > 0:
                 zlines.append("# --- Hide signal peptide (cleaved, 1-{}) ---".format(sp_end))

@@ -22,10 +22,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from epitope_pipeline import config
-from epitope_pipeline.utils import extract_ca_coords, setup_logging
-from epitope_pipeline.target_input import resolve_targets, TargetResolutionError
-from epitope_pipeline.structure import acquire_structure, StructureAcquisitionError
-from epitope_pipeline.membrane import annotate_membrane, MembraneAnnotationError
+from epitope_pipeline.utils import setup_logging
+from epitope_pipeline.io.pdb import extract_ca_coords
+from epitope_pipeline.io.targets import resolve_targets, TargetResolutionError
+from epitope_pipeline.io.structure import acquire_structure, StructureAcquisitionError
+from epitope_pipeline.io.membrane import annotate_membrane, MembraneAnnotationError
 from epitope_pipeline.spatial import filter_ectodomain
 from epitope_pipeline.surface import analyze_surface, cluster_ectodomain_patches
 from epitope_pipeline.conservation import (
@@ -373,7 +374,7 @@ def run_bispecific(
     logger.info("EXPORT: Bispecific outputs")
     logger.info("=" * 70)
 
-    from epitope_pipeline.export_bispecific import export_bispecific_all
+    from epitope_pipeline.io.export_bispecific import export_bispecific_all
     export_bispecific_all(
         run_dir=str(run_dir),
         pair_results=pair_results,
