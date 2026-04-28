@@ -18,7 +18,7 @@ from epitope_pipeline.config import (
     COLOR_TRANSMEMBRANE,
     PALETTE,
 )
-from epitope_pipeline.visualize import (
+from epitope_pipeline.viz.visualize import (
     _draw_topology_brackets,
     _collect_domain_blocks,
 )

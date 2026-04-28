@@ -24,8 +24,9 @@ PUBLIC_MODULES = [
     "epitope_pipeline.io.membrane",
     "epitope_pipeline.io.export",
     "epitope_pipeline.io.export_bispecific",
-    "epitope_pipeline.visualize",
-    "epitope_pipeline.visualize_bispecific",
+    "epitope_pipeline.viz",
+    "epitope_pipeline.viz.visualize",
+    "epitope_pipeline.viz.visualize_bispecific",
 ]
 
 

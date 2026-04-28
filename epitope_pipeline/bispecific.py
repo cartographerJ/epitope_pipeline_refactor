@@ -34,7 +34,7 @@ from epitope_pipeline.compute.conservation import (
 )
 from epitope_pipeline.compute.specificity import filter_specificity
 from epitope_pipeline.compute.scoring import score_epitopes, compute_target_epitope_metric
-from epitope_pipeline.visualize import plot_epitope_map, plot_blast_offtargets
+from epitope_pipeline.viz.visualize import plot_epitope_map, plot_blast_offtargets
 
 
 logger = logging.getLogger("epitope_pipeline")
@@ -451,7 +451,7 @@ def run_bispecific(
     logger.info("VISUALIZATION: Bispecific epitope maps")
     logger.info("=" * 70)
 
-    from epitope_pipeline.visualize_bispecific import (
+    from epitope_pipeline.viz.visualize_bispecific import (
         plot_bispecific_epitope_map, plot_bispecific_summary,
         plot_bispecific_combined,
     )

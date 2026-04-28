@@ -39,7 +39,7 @@ from epitope_pipeline.compute.conservation import analyze_conservation, Conserva
 from epitope_pipeline.compute.specificity import filter_specificity
 from epitope_pipeline.compute.scoring import score_epitopes, compute_target_epitope_metric
 from epitope_pipeline.io.export import export_all
-from epitope_pipeline.visualize import plot_epitope_map, plot_scoring_summary, plot_blast_offtargets
+from epitope_pipeline.viz.visualize import plot_epitope_map, plot_scoring_summary, plot_blast_offtargets
 
 
 logger = logging.getLogger("epitope_pipeline")
