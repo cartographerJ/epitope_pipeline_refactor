@@ -636,7 +636,7 @@ def _score_orientation(distal_zone, proximal_zone):
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def main():
     import argparse
     parser = argparse.ArgumentParser(
         description="Bispecific epitope pipeline")
@@ -669,3 +669,7 @@ if __name__ == "__main__":
             pr.final_pair_score,
             " [DUAL-VALID]" if pr.both_valid else "",
         ))
+
+
+if __name__ == "__main__":
+    main()

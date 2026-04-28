@@ -450,7 +450,7 @@ def run_pipeline(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def main():
     if len(sys.argv) < 2:
         print("Usage: python -m epitope_pipeline.run TARGET1 [TARGET2 ...]")
         print("")
@@ -472,3 +472,7 @@ if __name__ == "__main__":
             metric.get("n_patches", 0),
             metric.get("total_epitope_area_a2", 0.0),
         ))
+
+
+if __name__ == "__main__":
+    main()
