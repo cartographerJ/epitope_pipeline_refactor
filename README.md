@@ -61,7 +61,7 @@ Interactive Streamlit app supporting single-target and bispecific modes with con
 | Step | Module | Description |
 |------|--------|-------------|
 | 1 | `target_input.py` | Resolve UniProt IDs or gene names to full protein metadata + InterPro domains |
-| 2 | `structure.py` | Acquire structure: AlphaFold DB (default), experimental PDB (opt-in), or Tamarind AlphaFold (fallback) |
+| 2 | `structure.py` | Acquire structure: AlphaFold DB (default) or experimental PDB (opt-in via `force_experimental=True`) |
 | 3 | `membrane.py` | Define membrane plane (OPM, TM annotations, or GPI-anchor) |
 | 4 | `spatial.py` | Filter to ectodomain residues ≥80A from membrane surface (default; bispecific uses 60A/40A) |
 | 5 | `surface.py` | Calculate SASA, cluster into surface patches ≥600 A² |
@@ -224,20 +224,19 @@ The pipeline defaults to AlphaFold DB for full-length, gap-free structures. Expe
 
 1. **AlphaFold DB** (default) — Pre-computed full-length structures from EBI's AlphaFold Protein Structure Database. Queries the API to discover the latest model version (currently v6). No API key required. Full-length models provide complete SASA coverage without gaps from disordered loops or uncovered regions.
 2. **Experimental PDB** (opt-in via `force_experimental=True`) — RCSB search for X-ray/cryo-EM structures ≤3.5A resolution, ranked by ectodomain coverage × (1/resolution). Requires ≥80% coverage of the ectodomain (not full-length protein). PDB entity sequences are aligned to the UniProt sequence via BioPython PairwiseAligner for accurate coverage mapping.
-3. **Tamarind AlphaFold** — De novo AlphaFold prediction via the Tamarind API (requires API key). Used only for proteins not in AlphaFold DB.
+
+Targets in neither AlphaFold DB nor a usable experimental PDB raise `StructureAcquisitionError`. Sequence-based folding (planned Boltz-2 integration) is not yet wired in.
 
 ## Dependencies
 
+Declared in `pyproject.toml`:
+
 ```
-# Core
+numpy>=1.24,<2.0         # Array operations
+scipy>=1.10              # Spatial clustering
 biopython>=1.81          # PDB parsing, alignment, BLAST
 freesasa>=2.2.0          # Solvent-accessible surface area
-scipy>=1.10              # Spatial clustering
-numpy>=1.24,<2.0         # Array operations
 requests>=2.28           # API calls
-python-dotenv>=0.21      # Environment config
-
-# Visualization & export
 matplotlib>=3.7.1,<3.8   # Figures
 openpyxl>=3.0            # Excel output
 ```
@@ -245,12 +244,9 @@ openpyxl>=3.0            # Excel output
 ### Installation
 
 ```bash
-pip install -r requirements.txt
-```
-
-**Note**: Most human proteins have pre-computed structures in AlphaFold DB (no API key needed). The Tamarind API is only required as a last resort for proteins not in AlphaFold DB. Set your API key in `tamarind/.env`:
-```
-TAMARIND_API_KEY=your_key_here
+pip install -e .              # core
+pip install -e ".[app]"       # + streamlit UI
+pip install -e ".[dev]"       # + pytest
 ```
 
 ### Local BLAST Database Setup (Recommended)

@@ -2,27 +2,17 @@
 Epitope pipeline configuration.
 
 All tunable parameters, API URLs, path conventions, and thresholds.
-Tamarind API key is loaded from the existing tamarind/.env file.
 """
 
-import os
 from pathlib import Path
-from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 PIPELINE_ROOT = Path(__file__).parent
-PROJECT_ROOT = PIPELINE_ROOT.parent
-TAMARIND_ROOT = PROJECT_ROOT / "tamarind"
-
-# Load Tamarind API key from existing .env
-load_dotenv(TAMARIND_ROOT / ".env")
-TAMARIND_API_KEY = os.environ.get("TAMARIND_API_KEY", "")
 
 # Output directories
 RUNS_DIR = PIPELINE_ROOT / "runs"
-RAW_JOBS_DIR = PIPELINE_ROOT / "raw_jobs"
 CACHE_DIR = PIPELINE_ROOT / "cache"
 
 # ---------------------------------------------------------------------------
@@ -53,10 +43,6 @@ ALLOWED_METHODS = [                 # No NMR
 ]
 MIN_COVERAGE_FRACTION = 0.30        # Prefer AlphaFold if best PDB covers <30% of protein
 MIN_ECTODOMAIN_COVERAGE = 0.80      # Require >=80% of ectodomain covered by PDB
-FOLDING_TOOL = "alphafold"          # Tamarind folding service name
-FOLDING_NUM_MODELS = 1
-FOLDING_NUM_RECYCLES = 3
-FOLDING_TIMEOUT = 7200              # 2 hours max wait
 
 # ---------------------------------------------------------------------------
 # Membrane / spatial thresholds

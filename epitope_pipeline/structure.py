@@ -3,20 +3,17 @@ Step 2: Structure Acquisition — obtain 3D structures for target proteins.
 
 Prefers validated experimental structures from the PDB (X-ray or cryo-EM,
 <=3.5A resolution). Falls back to AlphaFold DB pre-computed structures for
-proteins with low experimental coverage, and to Tamarind AlphaFold prediction
-as a last resort.
+proteins with low experimental coverage. Targets with neither raise
+StructureAcquisitionError; sequence-based folding (planned Boltz-2) is not
+yet wired in.
 
 Structures are ranked by coverage of the full-length protein weighted by
 resolution. The best structure is downloaded to the run's structures/ directory.
 """
 
-import io
 import json
 import logging
-import os
-import sys
 import time
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -27,23 +24,14 @@ from epitope_pipeline.config import (
     ALLOWED_METHODS,
     ALPHAFOLD_DB_URL,
     CACHE_DIR,
-    FOLDING_NUM_MODELS,
-    FOLDING_NUM_RECYCLES,
-    FOLDING_TOOL,
-    FOLDING_TIMEOUT,
     MIN_COVERAGE_FRACTION,
     MIN_ECTODOMAIN_COVERAGE,
-    RAW_JOBS_DIR,
     RCSB_API,
     RCSB_FILES,
     RCSB_SEARCH_API,
     RESOLUTION_THRESHOLD_A,
     RETRY_RCSB,
 )
-
-# Import TamarindClient from sibling project
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from tamarind.client import TamarindClient, TamarindError
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +45,9 @@ class StructureResult:
     """Result of structure acquisition for one target."""
     uniprot_id: str
     gene_name: str
-    pdb_path: str               # Local path to downloaded/predicted PDB file
-    source: str                 # "pdb_experimental" or "tamarind_alphafold"
-    pdb_id: str                 # PDB ID or Tamarind job name
+    pdb_path: str               # Local path to downloaded PDB file
+    source: str                 # "pdb_experimental" or "alphafold_db"
+    pdb_id: str                 # PDB ID or "AF-<uniprot>"
     method: str                 # "X-RAY DIFFRACTION", "ELECTRON MICROSCOPY", or "AlphaFold"
     resolution: Optional[float] # Resolution in Angstroms (None for predicted)
     chain_id: str               # Chain ID of the target protein in the PDB file
@@ -82,7 +70,7 @@ def acquire_structure(target, structures_dir, force_experimental=False):
 
     Default: AlphaFold DB (full-length, gap-free coverage).
     Opt-in: experimental PDB (X-ray/cryo-EM, >=80% ectodomain coverage).
-    Last resort: Tamarind AlphaFold prediction (de novo).
+    Targets with neither raise StructureAcquisitionError.
 
     Args:
         target: TargetInfo object from target_input module.
@@ -141,9 +129,11 @@ def acquire_structure(target, structures_dir, force_experimental=False):
     if afdb_result is not None:
         return afdb_result
 
-    # Fallback: Tamarind AlphaFold prediction (de novo)
-    logger.info("  Folding %s via Tamarind %s...", target.gene_name, FOLDING_TOOL)
-    return _fold_with_tamarind(target, structures_dir)
+    raise StructureAcquisitionError(
+        "No structure available for {} ({}): not in AlphaFold DB and no "
+        "experimental PDB. Sequence-based folding has been removed; see "
+        "the planned Boltz-2 integration.".format(target.gene_name, target.uniprot_id)
+    )
 
 
 def acquire_structures(targets, structures_dir):
@@ -622,150 +612,3 @@ def _try_alphafold_db(target, structures_dir):
 
     return None
 
-
-# ---------------------------------------------------------------------------
-# Tamarind AlphaFold fallback
-# ---------------------------------------------------------------------------
-
-def _fold_with_tamarind(target, structures_dir):
-    """
-    Submit a structure prediction job to Tamarind AlphaFold.
-
-    Uses the TamarindClient from the tamarind project. Job results
-    (PDB files) are saved to raw_jobs/ and copied to structures_dir.
-
-    Args:
-        target: TargetInfo with sequence.
-        structures_dir: Directory for the output PDB.
-
-    Returns:
-        StructureResult with predicted structure.
-
-    Raises:
-        StructureAcquisitionError: If folding fails or times out.
-    """
-    job_name = "epitope_{}_fold".format(target.gene_name.lower())
-    raw_dir = RAW_JOBS_DIR / job_name
-    raw_dir.mkdir(parents=True, exist_ok=True)
-
-    # Check if we already have results from a previous run
-    existing_pdb = list(raw_dir.glob("*.pdb"))
-    if existing_pdb:
-        pdb_path = existing_pdb[0]
-        dest = Path(structures_dir) / "{}_alphafold.pdb".format(target.gene_name.lower())
-        if not dest.exists():
-            import shutil
-            shutil.copy2(str(pdb_path), str(dest))
-        logger.info("  Using cached AlphaFold prediction: %s", dest)
-        return StructureResult(
-            uniprot_id=target.uniprot_id,
-            gene_name=target.gene_name,
-            pdb_path=str(dest),
-            source="tamarind_alphafold",
-            pdb_id=job_name,
-            method="AlphaFold",
-            resolution=None,
-            chain_id="A",  # AlphaFold predictions use chain A
-            coverage_start=1,
-            coverage_end=target.sequence_length,
-        )
-
-    # Submit to Tamarind
-    try:
-        client = TamarindClient()
-
-        settings = {
-            "sequence": target.sequence,
-            "numModels": str(FOLDING_NUM_MODELS),  # API expects string options
-            "numRecycles": FOLDING_NUM_RECYCLES,
-        }
-
-        try:
-            client.submit_job(job_name, FOLDING_TOOL, settings)
-            logger.info("  Submitted AlphaFold job: %s", job_name)
-        except TamarindError as e:
-            if "already exists" in str(e).lower():
-                logger.info("  Job %s already exists, waiting for completion...", job_name)
-            else:
-                raise
-
-        # Wait for completion
-        client.wait_for_job(job_name, timeout=FOLDING_TIMEOUT, verbose=True)
-        logger.info("  AlphaFold job completed: %s", job_name)
-
-        # Download results
-        result = client.get_result(job_name)
-        pdb_path = _download_fold_result(result, raw_dir, target, structures_dir)
-
-        return StructureResult(
-            uniprot_id=target.uniprot_id,
-            gene_name=target.gene_name,
-            pdb_path=str(pdb_path),
-            source="tamarind_alphafold",
-            pdb_id=job_name,
-            method="AlphaFold",
-            resolution=None,
-            chain_id="A",
-            coverage_start=1,
-            coverage_end=target.sequence_length,
-        )
-
-    except (TamarindError, Exception) as e:
-        raise StructureAcquisitionError(
-            "Tamarind AlphaFold folding failed for {}: {}".format(target.gene_name, e)
-        )
-
-
-def _download_fold_result(result, raw_dir, target, structures_dir):
-    """
-    Download and extract AlphaFold prediction result.
-
-    The Tamarind API returns either a download URL (for zip archives)
-    or a direct data dict. Handles both cases.
-
-    Returns:
-        Path to the extracted PDB file in structures_dir.
-    """
-    if isinstance(result, str):
-        # Result is a download URL
-        resp = requests.get(result, timeout=60)
-        resp.raise_for_status()
-
-        # Try as zip archive
-        try:
-            with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                zf.extractall(str(raw_dir))
-                # Find the PDB file in extracted contents
-                pdb_files = [f for f in zf.namelist() if f.endswith(".pdb")]
-                if pdb_files:
-                    src = raw_dir / pdb_files[0]
-                    dest = Path(structures_dir) / "{}_alphafold.pdb".format(
-                        target.gene_name.lower()
-                    )
-                    import shutil
-                    shutil.copy2(str(src), str(dest))
-                    return dest
-        except zipfile.BadZipFile:
-            # Not a zip — probably raw PDB content
-            dest = Path(structures_dir) / "{}_alphafold.pdb".format(
-                target.gene_name.lower()
-            )
-            with open(dest, "wb") as f:
-                f.write(resp.content)
-            return dest
-
-    elif isinstance(result, dict):
-        # Direct data dict — look for PDB content or URL
-        if "url" in result:
-            return _download_fold_result(result["url"], raw_dir, target, structures_dir)
-        elif "pdb" in result:
-            dest = Path(structures_dir) / "{}_alphafold.pdb".format(
-                target.gene_name.lower()
-            )
-            with open(dest, "w") as f:
-                f.write(result["pdb"])
-            return dest
-
-    raise StructureAcquisitionError(
-        "Could not extract PDB from AlphaFold result for {}".format(target.gene_name)
-    )

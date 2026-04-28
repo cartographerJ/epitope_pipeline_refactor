@@ -57,7 +57,6 @@ def run_pipeline(
     cyno_max_mismatches=None,
     cyno_mismatch_percent=None,
     nonspecific_percent=None,
-    folding_tool=None,
     force_experimental=False,
     verbose=True,
 ):
@@ -72,7 +71,6 @@ def run_pipeline(
             When set, pipeline finds epitopes <= max_distance_a from membrane
             instead of >= min_distance_a.
         cyno_max_mismatches: Override max cyno mismatches per 600A² (default 2).
-        folding_tool: Override Tamarind folding tool (default "alphafold").
         force_experimental: Use experimental PDB when available (default: AlphaFold).
         verbose: Whether to log to console (default True).
 
@@ -92,8 +90,6 @@ def run_pipeline(
         config.MAX_CYNO_MISMATCH_PERCENT = cyno_mismatch_percent
     if nonspecific_percent is not None:
         config.MAX_NONSPECIFIC_PERCENT = nonspecific_percent
-    if folding_tool is not None:
-        config.FOLDING_TOOL = folding_tool
 
     # --- Setup logging ---
     setup_logging(verbose)
@@ -140,7 +136,6 @@ def run_pipeline(
         "cyno_mismatch_scaling": "min(base% * sqrt(n_residues/20), 30%)",
         "nonspecific_percent_base": config.MAX_NONSPECIFIC_PERCENT,
         "nonspecific_rule": "worst single paralog match fraction <= nonspecific_percent_base",
-        "folding_tool": config.FOLDING_TOOL,
         "vhh_footprint_min_a2": config.VHH_FOOTPRINT_MIN_A2,
         "patch_clustering_distance_a": config.PATCH_CLUSTERING_DISTANCE_A,
         "surface_exposure_threshold": config.SURFACE_EXPOSURE_THRESHOLD,
