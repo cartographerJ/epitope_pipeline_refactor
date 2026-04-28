@@ -27,13 +27,13 @@ from epitope_pipeline.io.pdb import extract_ca_coords
 from epitope_pipeline.io.targets import resolve_targets, TargetResolutionError
 from epitope_pipeline.io.structure import acquire_structure, StructureAcquisitionError
 from epitope_pipeline.io.membrane import annotate_membrane, MembraneAnnotationError
-from epitope_pipeline.spatial import filter_ectodomain
-from epitope_pipeline.surface import analyze_surface, cluster_ectodomain_patches
-from epitope_pipeline.conservation import (
+from epitope_pipeline.compute.spatial import filter_ectodomain
+from epitope_pipeline.compute.surface import analyze_surface, cluster_ectodomain_patches
+from epitope_pipeline.compute.conservation import (
     analyze_conservation, ConservationError, ConservationResult,
 )
-from epitope_pipeline.specificity import filter_specificity
-from epitope_pipeline.scoring import score_epitopes, compute_target_epitope_metric
+from epitope_pipeline.compute.specificity import filter_specificity
+from epitope_pipeline.compute.scoring import score_epitopes, compute_target_epitope_metric
 from epitope_pipeline.visualize import plot_epitope_map, plot_blast_offtargets
 
 

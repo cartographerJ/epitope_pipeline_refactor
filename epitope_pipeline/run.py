@@ -33,11 +33,11 @@ from epitope_pipeline.io.structure import (
     acquire_structure, StructureAcquisitionError,
 )
 from epitope_pipeline.io.membrane import annotate_membrane, MembraneAnnotationError
-from epitope_pipeline.spatial import filter_ectodomain
-from epitope_pipeline.surface import analyze_surface, cluster_ectodomain_patches
-from epitope_pipeline.conservation import analyze_conservation, ConservationError
-from epitope_pipeline.specificity import filter_specificity
-from epitope_pipeline.scoring import score_epitopes, compute_target_epitope_metric
+from epitope_pipeline.compute.spatial import filter_ectodomain
+from epitope_pipeline.compute.surface import analyze_surface, cluster_ectodomain_patches
+from epitope_pipeline.compute.conservation import analyze_conservation, ConservationError
+from epitope_pipeline.compute.specificity import filter_specificity
+from epitope_pipeline.compute.scoring import score_epitopes, compute_target_epitope_metric
 from epitope_pipeline.io.export import export_all
 from epitope_pipeline.visualize import plot_epitope_map, plot_scoring_summary, plot_blast_offtargets
 
@@ -274,7 +274,7 @@ def run_pipeline(
                     ectodomain_patches=ec_patches, ca_coords=ca_coords)
             else:
                 # No conservation data — still run BLAST for specificity track
-                from epitope_pipeline.conservation import ConservationResult
+                from epitope_pipeline.compute.conservation import ConservationResult
                 empty_cons = ConservationResult(
                     uniprot_id=target.uniprot_id,
                     gene_name=target.gene_name,
