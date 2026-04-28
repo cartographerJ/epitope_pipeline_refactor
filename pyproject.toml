@@ -30,3 +30,9 @@ epitope-bispecific = "epitope_pipeline.bispecific:main"
 [tool.setuptools.packages.find]
 include = ["epitope_pipeline*"]
 exclude = ["tests*", "diagnostics*", "scripts*", "archive*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: end-to-end tests that may hit network on first run",
+]
+addopts = "-m 'not slow'"
