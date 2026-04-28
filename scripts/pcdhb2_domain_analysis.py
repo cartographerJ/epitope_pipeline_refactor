@@ -12,7 +12,7 @@ from pathlib import Path
 # Add parent to path for pipeline imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from epitope_pipeline.surface import _calculate_sasa, cluster_surface_patches
+from epitope_pipeline.compute.surface import _calculate_sasa, cluster_surface_patches
 
 # ---------------------------------------------------------------------------
 # Config

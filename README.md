@@ -399,8 +399,8 @@ epitope_pipeline/
 Each module is independent and can be used individually:
 
 ```python
-from epitope_pipeline.target_input import resolve_targets
-from epitope_pipeline.membrane import annotate_membrane
+from epitope_pipeline.io.targets import resolve_targets
+from epitope_pipeline.io.membrane import annotate_membrane
 
 targets = resolve_targets(["ERBB2"])
 # ... use individual modules as needed

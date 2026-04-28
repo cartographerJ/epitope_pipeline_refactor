@@ -12,7 +12,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from epitope_pipeline import membrane as _membrane
+from epitope_pipeline.io import membrane as _membrane
 from epitope_pipeline import bispecific as _bispecific
 
 # ── Monkey-patch: inject GPI feature for SMPDL3B ───────────────────
