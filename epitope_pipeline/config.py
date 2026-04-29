@@ -9,7 +9,12 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-PIPELINE_ROOT = Path(__file__).parent
+# Repo root (one level above the package directory). Used as the default base
+# for run output, cache, and the local BLAST DB. Works for editable installs
+# from a checkout; if this package is ever site-installed in a venv where
+# writing into the install location isn't desirable, override these via env
+# vars or a user config.
+PIPELINE_ROOT = Path(__file__).resolve().parent.parent
 
 # Output directories
 RUNS_DIR = PIPELINE_ROOT / "runs"
