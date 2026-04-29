@@ -1,0 +1,81 @@
+{
+  "timestamp": "2026-04-29T09:55:35",
+  "git_commit": "2d07c5c",
+  "platform": "macOS-15.7.2-arm64-arm-64bit-Mach-O",
+  "python_version": "3.14.3",
+  "fixtures": [
+    "ERBB2",
+    "EGFR",
+    "MSLN"
+  ],
+  "use_local_blast": true,
+  "resolve_targets_s": 11.9492,
+  "results": [
+    {
+      "target": "ERBB2",
+      "uniprot_id": "P04626",
+      "sequence_length": 1255,
+      "n_qualifying_residues": 307,
+      "n_surface_patches": 2,
+      "n_conserved_patches": 2,
+      "n_specific_patches": 2,
+      "n_scored": 2,
+      "stages_s": {
+        "structure": 0.0001,
+        "ca_coords": 0.0392,
+        "membrane": 0.0317,
+        "spatial": 0.0279,
+        "surface": 0.2981,
+        "conservation": 0.0066,
+        "ec_patches": 0.0242,
+        "specificity": 1.362,
+        "scoring": 0.0001,
+        "total": 1.7899
+      }
+    },
+    {
+      "target": "EGFR",
+      "uniprot_id": "P00533",
+      "sequence_length": 1210,
+      "n_qualifying_residues": 141,
+      "n_surface_patches": 2,
+      "n_conserved_patches": 1,
+      "n_specific_patches": 1,
+      "n_scored": 1,
+      "stages_s": {
+        "structure": 0.0001,
+        "ca_coords": 0.0366,
+        "membrane": 0.0339,
+        "spatial": 0.0276,
+        "surface": 0.1547,
+        "conservation": 0.0056,
+        "ec_patches": 0.0274,
+        "specificity": 1.0295,
+        "scoring": 0.0001,
+        "total": 1.3153
+      }
+    },
+    {
+      "target": "MSLN",
+      "uniprot_id": "Q13421",
+      "sequence_length": 630,
+      "n_qualifying_residues": 112,
+      "n_surface_patches": 3,
+      "n_conserved_patches": 0,
+      "n_specific_patches": 0,
+      "n_scored": 0,
+      "stages_s": {
+        "structure": 0.0001,
+        "ca_coords": 0.0302,
+        "membrane": 0.0223,
+        "spatial": 0.0198,
+        "surface": 0.0871,
+        "conservation": 0.003,
+        "ec_patches": 0.0108,
+        "specificity": 0.8147,
+        "scoring": 0.0,
+        "total": 0.9881
+      }
+    }
+  ]
+}
