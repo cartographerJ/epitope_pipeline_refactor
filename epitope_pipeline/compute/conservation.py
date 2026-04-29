@@ -310,7 +310,7 @@ def evaluate_patch_conservation(patch, residue_conservation):
             - mismatch_percent: Float percentage (0-100).
             - effective_threshold: Size-adjusted threshold used (0-100).
     """
-    from .config import MAX_CYNO_MISMATCH_PERCENT
+    from epitope_pipeline.config import MAX_CYNO_MISMATCH_PERCENT
 
     n_residues = len(patch.residue_numbers)
     if n_residues == 0:
