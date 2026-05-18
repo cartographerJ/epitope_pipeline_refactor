@@ -45,8 +45,44 @@ results = run_pipeline(
 ### Command Line
 
 ```bash
+# Basic — positional gene names or UniProt IDs
 python -m epitope_pipeline.run ERBB2 EGFR
+
+# Batch from a file (one identifier per line; `#` comments and blanks ignored)
+python -m epitope_pipeline.run --targets-file targets.txt
+
+# Relax the cyno conservation threshold for borderline targets
+python -m epitope_pipeline.run ERBB2 --cyno-mismatch-percent 25
+
+# Bypass the cyno gate entirely (cyno identity still reported as a column)
+python -m epitope_pipeline.run LMP1 --no-cyno
+
+# Custom run name + distal mode
+python -m epitope_pipeline.run ERBB2 --min-distance 60 --run-name erbb2_distal_v2
+
+# Override the display name for figures/CSV (alias syntax — works for any target)
+python -m epitope_pipeline.run ERBB2=HER2 EGFR=ErbB1 MSLN
 ```
+
+In `--targets-file`, append `=ALIAS` to any line for the same effect:
+
+```text
+# targets.txt
+ERBB2=HER2
+EGFR=ErbB1
+MSLN
+# UniProt accessions work too:
+P04626=HER2_v2
+```
+
+From Python, pass an `aliases=` dict (keys can be the input identifier, the
+resolved gene name, or the UniProt accession — case-insensitive):
+
+```python
+run_pipeline(["ERBB2", "EGFR"], aliases={"ERBB2": "HER2", "EGFR": "ErbB1"})
+```
+
+Run `python -m epitope_pipeline.run --help` for the full flag list.
 
 ### Web Interface
 
@@ -142,6 +178,7 @@ runs/YYMMDD_HHMM_erbb2_egfr/
 │   └── ...
 └── Supplementary Files/
     ├── epitope_candidates.xlsx     # Color-formatted Excel workbook
+    ├── summary_metrics.csv         # One row per input target (pandas-readable)
     ├── Annotated Sequences/
     │   ├── erbb2_epitope.fasta     # FASTA with epitope annotations
     │   ├── erbb2_residue_table.csv # Per-residue: topology, SASA, conservation
@@ -237,9 +274,31 @@ scipy>=1.10              # Spatial clustering
 biopython>=1.81          # PDB parsing, alignment, BLAST
 freesasa>=2.2.0          # Solvent-accessible surface area
 requests>=2.28           # API calls
-matplotlib>=3.7.1,<3.8   # Figures
+matplotlib>=3.7.1        # Figures
 openpyxl>=3.0            # Excel output
+pandas>=2.0              # Batch summary DataFrame / CSV
 ```
+
+### Batch Summary DataFrame
+
+For any run with one or more targets, the pipeline writes
+`Supplementary Files/summary_metrics.csv` (one row per input target, including
+failures) and the Python API returns the same data as a pandas DataFrame:
+
+```python
+from epitope_pipeline.run import run_pipeline
+
+result = run_pipeline(["ERBB2", "EGFR", "MSLN"])
+df = result["metrics_df"]      # pandas.DataFrame, gene × info
+csv_path = result["summary_csv_path"]
+```
+
+Columns include `gene_name`, `uniprot_id`, `topology`, `n_tm_segments`,
+`n_surface_patches`, `n_conserved_patches`, `n_specific_patches`,
+`total_epitope_area_a2`, `target_score`, `area_component`, `quality_component`,
+`overall_cyno_identity`, and the run parameters (`mode`,
+`cyno_mismatch_percent_used`, `cyno_gate_skipped`). Targets that failed any
+pipeline step still appear, with missing metrics as NaN.
 
 ### Installation
 

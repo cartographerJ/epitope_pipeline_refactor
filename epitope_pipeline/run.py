@@ -38,7 +38,9 @@ from epitope_pipeline.compute.surface import analyze_surface, cluster_ectodomain
 from epitope_pipeline.compute.conservation import analyze_conservation, ConservationError
 from epitope_pipeline.compute.specificity import filter_specificity
 from epitope_pipeline.compute.scoring import score_epitopes, compute_target_epitope_metric
-from epitope_pipeline.io.export import export_all
+from epitope_pipeline.io.export import (
+    export_all, build_summary_dataframe, write_summary_metrics_csv,
+)
 from epitope_pipeline.viz.visualize import plot_epitope_map, plot_scoring_summary, plot_blast_offtargets
 
 
@@ -57,8 +59,10 @@ def run_pipeline(
     no_distance_filter=False,
     cyno_max_mismatches=None,
     cyno_mismatch_percent=None,
+    skip_cyno_gate=False,
     nonspecific_percent=None,
     force_experimental=False,
+    aliases=None,
     verbose=True,
 ):
     """
@@ -72,7 +76,17 @@ def run_pipeline(
             When set, pipeline finds epitopes <= max_distance_a from membrane
             instead of >= min_distance_a.
         cyno_max_mismatches: Override max cyno mismatches per 600A² (default 2).
+        cyno_mismatch_percent: Override per-patch cyno mismatch threshold (default 15%).
+        skip_cyno_gate: If True, bypass the cyno-conservation short-circuit so
+            scoring proceeds for all surface patches regardless of cyno divergence.
+            Per-residue cyno identity is still computed and reported. Useful for
+            viral or non-mammalian targets, or for exploratory runs.
         force_experimental: Use experimental PDB when available (default: AlphaFold).
+        aliases: Optional dict mapping any of the input identifier, the resolved
+            UniProt accession, or the resolved gene name → a display alias.
+            Matching is case-insensitive. The alias overwrites
+            ``target.gene_name``, so it propagates through every output (figure
+            file names, CSV rows, log lines, scoring summary chart).
         verbose: Whether to log to console (default True).
 
     Returns:
@@ -135,6 +149,7 @@ def run_pipeline(
         "max_distance_a": max_distance_a,
         "cyno_mismatch_percent_base": config.MAX_CYNO_MISMATCH_PERCENT,
         "cyno_mismatch_scaling": "min(base% * sqrt(n_residues/20), 30%)",
+        "cyno_gate_skipped": skip_cyno_gate,
         "nonspecific_percent_base": config.MAX_NONSPECIFIC_PERCENT,
         "nonspecific_rule": "worst single paralog match fraction <= nonspecific_percent_base",
         "vhh_footprint_min_a2": config.VHH_FOOTPRINT_MIN_A2,
@@ -156,6 +171,23 @@ def run_pipeline(
         return {"run_dir": str(run_dir), "targets": [], "scores": {}, "metrics": {}}
 
     logger.info("Resolved %d targets", len(targets))
+
+    # Apply display aliases: overwrite target.gene_name so the alias flows
+    # through every downstream output (figures, CSV rows, file names, logs).
+    # Match by input identifier, resolved gene name, or UniProt accession —
+    # case-insensitive — so the caller can key on whichever they have handy.
+    if aliases:
+        alias_lookup = {k.upper(): v for k, v in aliases.items()}
+        for ident, target in zip(identifiers, targets):
+            alias = (
+                alias_lookup.get(ident.upper())
+                or alias_lookup.get(target.gene_name.upper())
+                or alias_lookup.get(target.uniprot_id.upper())
+            )
+            if alias and alias != target.gene_name:
+                logger.info("  Alias: %s (%s) -> %s",
+                            target.gene_name, target.uniprot_id, alias)
+                target.gene_name = alias
 
     # Per-target pipeline state
     all_structures = {}
@@ -268,14 +300,12 @@ def run_pipeline(
                     target, structure, membrane, surface.residue_sasa,
                     ca_coords=ca_coords,
                 )
-            if conservation_for_spec:
-                specificity = filter_specificity(
-                    target, conservation_for_spec,
-                    ectodomain_patches=ec_patches, ca_coords=ca_coords)
-            else:
-                # No conservation data — still run BLAST for specificity track
-                from epitope_pipeline.compute.conservation import ConservationResult
-                empty_cons = ConservationResult(
+            from epitope_pipeline.compute.conservation import ConservationResult
+            from dataclasses import replace
+
+            if conservation_for_spec is None:
+                # No cyno ortholog — synthesize an empty result so BLAST still runs
+                conservation_for_spec = ConservationResult(
                     uniprot_id=target.uniprot_id,
                     gene_name=target.gene_name,
                     alignment_human="",
@@ -286,9 +316,19 @@ def run_pipeline(
                     rejected_patches=[],
                     patch_conservation={},
                 )
-                specificity = filter_specificity(
-                    target, empty_cons,
-                    ectodomain_patches=ec_patches, ca_coords=ca_coords)
+
+            # With --no-cyno, widen the candidate set to every surface patch so
+            # cyno-divergent patches still reach scoring. Per-residue cyno
+            # identity (residue_conservation / patch_conservation) is preserved.
+            if skip_cyno_gate and surface and surface.patches:
+                conservation_for_spec = replace(
+                    conservation_for_spec,
+                    conserved_patches=list(surface.patches),
+                )
+
+            specificity = filter_specificity(
+                target, conservation_for_spec,
+                ectodomain_patches=ec_patches, ca_coords=ca_coords)
             all_specificity[uid] = specificity
         except Exception as e:
             logger.error("  Specificity screening FAILED for %s: %s", target.gene_name, e)
@@ -307,11 +347,29 @@ def run_pipeline(
 
         conservation = all_conservation.get(uid)
         if not conservation or not conservation.conserved_patches:
-            if conservation:
-                logger.info("  No patches pass cyno conservation (max %d mismatches per 600A²)",
-                            config.MAX_CYNO_MISMATCHES_PER_600A2)
-            all_metrics[uid] = empty_metric()
-            continue
+            if not skip_cyno_gate:
+                if conservation:
+                    logger.info("  No patches pass cyno conservation (max %.1f%% mismatches)",
+                                config.MAX_CYNO_MISMATCH_PERCENT)
+                all_metrics[uid] = empty_metric()
+                continue
+            # skip_cyno_gate: fall through with the gate bypassed. Scoring
+            # needs a conservation object — synthesize one if absent.
+            if conservation is None:
+                from epitope_pipeline.compute.conservation import ConservationResult
+                conservation = ConservationResult(
+                    uniprot_id=target.uniprot_id,
+                    gene_name=target.gene_name,
+                    alignment_human="",
+                    alignment_cyno="",
+                    overall_identity=0.0,
+                    residue_conservation={},
+                    conserved_patches=[],
+                    rejected_patches=[],
+                    patch_conservation={},
+                )
+                all_conservation[uid] = conservation
+            logger.info("  --no-cyno: bypassing cyno conservation gate")
 
         specific_patches = all_specificity[uid].specific_patches if uid in all_specificity else []
         if not specific_patches:
@@ -348,6 +406,21 @@ def run_pipeline(
         uid = target.uniprot_id
         if uid not in all_metrics:
             all_metrics[uid] = empty_metric()
+
+    # Build the gene × info summary DataFrame (one row per input target,
+    # including failures) and write it as a pandas-readable CSV.
+    metrics_df = build_summary_dataframe(
+        targets=targets,
+        target_metrics=all_metrics,
+        surface_analyses=all_surface,
+        conservation_results=all_conservation,
+        specificity_results=all_specificity,
+        epitope_scores=all_scores,
+        membranes=all_membranes,
+        parameters=parameters,
+        run_name=run_name,
+    )
+    summary_csv_path = write_summary_metrics_csv(supp_dir, metrics_df)
 
     export_all(
         run_dir=str(run_dir),
@@ -439,6 +512,8 @@ def run_pipeline(
         "targets": targets,
         "scores": all_scores,
         "metrics": all_metrics,
+        "metrics_df": metrics_df,
+        "summary_csv_path": str(summary_csv_path),
     }
 
 
@@ -446,18 +521,124 @@ def run_pipeline(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python -m epitope_pipeline.run TARGET1 [TARGET2 ...]")
-        print("")
-        print("Targets can be UniProt IDs (e.g. P04626) or gene names (e.g. ERBB2)")
-        print("")
-        print("Example:")
-        print("  python -m epitope_pipeline.run ERBB2 EGFR")
-        sys.exit(1)
+def _split_alias(token):
+    """Split ``IDENT=ALIAS`` into ``(ident, alias)`` (``alias`` may be None).
 
-    identifiers = sys.argv[1:]
-    results = run_pipeline(identifiers, max_distance_a=config.PROXIMAL_MAX_DISTANCE_A)
+    Whitespace around the delimiter is stripped. An empty alias after ``=`` is
+    treated as no alias.
+    """
+    if "=" in token:
+        ident, _, alias = token.partition("=")
+        ident = ident.strip()
+        alias = alias.strip() or None
+        return ident, alias
+    return token.strip(), None
+
+
+def _load_targets_file(path):
+    """Read one ``IDENT[=ALIAS]`` per line; ignore blank lines and `#` comments."""
+    p = Path(path)
+    if not p.exists():
+        raise SystemExit(f"--targets-file not found: {path}")
+    out = []
+    for line in p.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            out.append(line)
+    return out
+
+
+def _dedupe(items):
+    """Preserve order, drop later duplicates."""
+    seen = set()
+    out = []
+    for it in items:
+        if it not in seen:
+            seen.add(it)
+            out.append(it)
+    return out
+
+
+def build_argparser():
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="epitope-pipeline",
+        description=(
+            "Find druggable VHH epitopes on human membrane proteins. "
+            "Targets can be UniProt IDs (P04626) or gene names (ERBB2)."
+        ),
+    )
+    parser.add_argument("targets", nargs="*", metavar="TARGET",
+                        help="UniProt accessions or gene names. Append "
+                             "`=ALIAS` (e.g. ERBB2=HER2) to override the "
+                             "display name used in figures and CSVs.")
+    parser.add_argument("--targets-file", metavar="PATH",
+                        help="File with one IDENT[=ALIAS] per line; merges with positional args. "
+                             "Blank lines and `#` comments are ignored.")
+    parser.add_argument("--run-name", metavar="NAME",
+                        help="Custom run-directory name under runs/")
+    parser.add_argument("--min-distance", type=float, dest="min_distance_a",
+                        help="Distal mode: minimum distance from membrane (Å); default 80")
+    parser.add_argument("--max-distance", type=float, dest="max_distance_a",
+                        help="Proximal mode: maximum distance from membrane (Å)")
+    parser.add_argument("--no-distance-filter", action="store_true",
+                        help="Skip the ectodomain distance filter entirely")
+    parser.add_argument("--cyno-mismatch-percent", type=float,
+                        dest="cyno_mismatch_percent",
+                        help="Per-patch cyno mismatch tolerance (default 15)")
+    parser.add_argument("--no-cyno", action="store_true", dest="skip_cyno_gate",
+                        help="Bypass the cyno-conservation gate entirely "
+                             "(per-residue cyno identity is still reported)")
+    parser.add_argument("--nonspecific-percent", type=float,
+                        dest="nonspecific_percent",
+                        help="Worst-paralog match fraction allowed (default 85)")
+    parser.add_argument("--force-experimental", action="store_true",
+                        help="Prefer experimental PDB structures over AlphaFold")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress console logging (file log still written)")
+    return parser
+
+
+def main():
+    parser = build_argparser()
+    args = parser.parse_args()
+
+    raw_tokens = list(args.targets)
+    if args.targets_file:
+        raw_tokens.extend(_load_targets_file(args.targets_file))
+
+    identifiers = []
+    aliases = {}
+    for token in raw_tokens:
+        ident, alias = _split_alias(token)
+        if not ident:
+            continue
+        identifiers.append(ident)
+        if alias:
+            aliases[ident] = alias
+    identifiers = _dedupe(identifiers)
+
+    if not identifiers:
+        parser.error("no targets provided (pass positional args or --targets-file)")
+
+    # Default to proximal mode unless the user picks distal explicitly
+    max_distance = args.max_distance_a
+    if max_distance is None and args.min_distance_a is None and not args.no_distance_filter:
+        max_distance = config.PROXIMAL_MAX_DISTANCE_A
+
+    results = run_pipeline(
+        identifiers,
+        run_name=args.run_name,
+        min_distance_a=args.min_distance_a,
+        max_distance_a=max_distance,
+        no_distance_filter=args.no_distance_filter,
+        cyno_mismatch_percent=args.cyno_mismatch_percent,
+        skip_cyno_gate=args.skip_cyno_gate,
+        nonspecific_percent=args.nonspecific_percent,
+        force_experimental=args.force_experimental,
+        aliases=aliases or None,
+        verbose=not args.quiet,
+    )
 
     print("\nDone! Results in: {}".format(results["run_dir"]))
     for target in results.get("targets", []):

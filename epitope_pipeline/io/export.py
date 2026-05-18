@@ -14,11 +14,13 @@ Generates:
 import csv
 import json
 import logging
+import math
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 from Bio.PDB import PDBParser, PDBIO, Select
 
 from epitope_pipeline.config import (
@@ -337,6 +339,121 @@ def export_results_csv(run_dir, targets, epitope_scores, target_metrics):
             writer.writeheader()
             writer.writerows(rows)
         logger.info("  Wrote %s (%d rows)", csv_path.name, len(rows))
+
+
+# ---------------------------------------------------------------------------
+# Summary metrics DataFrame
+# ---------------------------------------------------------------------------
+
+SUMMARY_DATAFRAME_COLUMNS = [
+    "gene_name", "uniprot_id", "sequence_length",
+    "topology", "n_tm_segments",
+    "n_surface_patches", "n_conserved_patches",
+    "n_specific_patches", "n_scored_patches",
+    "total_epitope_area_a2", "total_ectodomain_area_a2", "epitope_fraction",
+    "n_patches", "best_score",
+    "target_score", "area_component", "quality_component",
+    "overall_cyno_identity", "max_off_target_identity_overall",
+    "run_name", "mode", "cyno_mismatch_percent_used", "cyno_gate_skipped",
+]
+
+
+def build_summary_dataframe(
+    targets,
+    target_metrics,
+    surface_analyses,
+    conservation_results,
+    specificity_results,
+    epitope_scores,
+    membranes,
+    parameters,
+    run_name,
+):
+    """
+    Build a one-row-per-target metrics DataFrame for batch analysis.
+
+    Every input target produces a row, including those that failed any pipeline
+    step — missing fields are filled with NaN (numeric) or empty string. Pulls
+    only from data already held in memory; no recomputation.
+
+    Returns:
+        pandas.DataFrame indexed 0..N-1 with the columns listed in
+        SUMMARY_DATAFRAME_COLUMNS, in that order.
+    """
+    rows = []
+    nan = float("nan")
+    mode = parameters.get("mode", "")
+    cyno_pct = parameters.get("cyno_mismatch_percent_base", nan)
+    cyno_skipped = bool(parameters.get("cyno_gate_skipped", False))
+
+    for target in targets:
+        uid = target.uniprot_id
+        membrane = membranes.get(uid)
+        surface = surface_analyses.get(uid)
+        conservation = conservation_results.get(uid)
+        specificity = specificity_results.get(uid)
+        scores = epitope_scores.get(uid, []) or []
+        metric = target_metrics.get(uid, {}) or {}
+
+        n_surface = len(surface.patches) if surface and surface.patches else 0
+        n_conserved = (
+            len(conservation.conserved_patches)
+            if conservation and conservation.conserved_patches else 0
+        )
+        n_specific = (
+            len(specificity.specific_patches)
+            if specificity and specificity.specific_patches else 0
+        )
+        n_scored = len(scores)
+
+        overall_cyno = (
+            conservation.overall_identity if conservation else nan
+        )
+        max_off_target = (
+            max((s.max_off_target_identity for s in scores), default=nan)
+            if scores else nan
+        )
+
+        rows.append({
+            "gene_name": target.gene_name,
+            "uniprot_id": uid,
+            "sequence_length": target.sequence_length,
+            "topology": membrane.topology_type if membrane else "",
+            "n_tm_segments": len(membrane.tm_segments) if membrane else 0,
+            "n_surface_patches": n_surface,
+            "n_conserved_patches": n_conserved,
+            "n_specific_patches": n_specific,
+            "n_scored_patches": n_scored,
+            "total_epitope_area_a2": metric.get("total_epitope_area_a2", nan),
+            "total_ectodomain_area_a2": metric.get("total_ectodomain_area_a2", nan),
+            "epitope_fraction": metric.get("epitope_fraction", nan),
+            "n_patches": metric.get("n_patches", 0),
+            "best_score": metric.get("best_score", nan),
+            "target_score": metric.get("target_score", nan),
+            "area_component": metric.get("area_component", nan),
+            "quality_component": metric.get("quality_component", nan),
+            "overall_cyno_identity": overall_cyno,
+            "max_off_target_identity_overall": max_off_target,
+            "run_name": run_name,
+            "mode": mode,
+            "cyno_mismatch_percent_used": cyno_pct,
+            "cyno_gate_skipped": cyno_skipped,
+        })
+
+    return pd.DataFrame(rows, columns=SUMMARY_DATAFRAME_COLUMNS)
+
+
+def write_summary_metrics_csv(supp_dir, df):
+    """Write the summary DataFrame to Supplementary Files/summary_metrics.csv.
+
+    Returns the written path.
+    """
+    supp_dir = Path(supp_dir)
+    supp_dir.mkdir(parents=True, exist_ok=True)
+    out_path = supp_dir / "summary_metrics.csv"
+    df.to_csv(out_path, index=False)
+    logger.info("  Wrote %s (%d rows)", out_path.name, len(df))
+    return out_path
 
 
 # ---------------------------------------------------------------------------
