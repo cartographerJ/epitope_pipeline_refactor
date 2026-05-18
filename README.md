@@ -64,25 +64,90 @@ python -m epitope_pipeline.run ERBB2 --min-distance 60 --run-name erbb2_distal_v
 python -m epitope_pipeline.run ERBB2=HER2 EGFR=ErbB1 MSLN
 ```
 
-In `--targets-file`, append `=ALIAS` to any line for the same effect:
+Run `python -m epitope_pipeline.run --help` for the full flag list.
+
+### Batch screening with aliases
+
+For a portfolio-style run of many targets where you want non-default labels
+(trivial names, project codenames, isoform tags, etc.), there are three
+equivalent ways to provide aliases. The alias overwrites `target.gene_name`
+after target resolution, so it propagates everywhere downstream — figure
+file names, CSV `gene_name` column, scoring summary chart labels, log lines,
+and annotated PDB/PML file names. The original UniProt accession is always
+preserved on `target.uniprot_id`.
+
+**1. Inline on the CLI** — append `=ALIAS` to any positional target:
+
+```bash
+python -m epitope_pipeline.run \
+    ERBB2=HER2 \
+    EGFR=ErbB1 \
+    MSLN=Mesothelin \
+    NECTIN4=PVRL4 \
+    CLDN18.2=Claudin18_2 \
+    --run-name onco_panel_2026Q2
+```
+
+Plain identifiers (without `=ALIAS`) keep their resolved gene name.
+
+**2. From a targets file** — same `IDENT[=ALIAS]` syntax, one per line.
+Blank lines and `#` comments are ignored. UniProt accessions work as keys
+too, which is useful when an isoform doesn't have its own gene symbol:
 
 ```text
-# targets.txt
+# onco_panel.txt — alias any subset of entries
 ERBB2=HER2
 EGFR=ErbB1
-MSLN
-# UniProt accessions work too:
-P04626=HER2_v2
+MSLN=Mesothelin
+NECTIN4=PVRL4
+
+# UniProt accession with alias (useful for isoforms)
+P56856-2=CLDN18_2
+
+# Plain (no alias) — gets the resolved gene name in outputs
+ITGB6
 ```
 
-From Python, pass an `aliases=` dict (keys can be the input identifier, the
-resolved gene name, or the UniProt accession — case-insensitive):
+```bash
+python -m epitope_pipeline.run \
+    --targets-file onco_panel.txt \
+    --run-name onco_panel_2026Q2
+```
+
+You can mix positional args and `--targets-file`; duplicates are dropped in
+input order.
+
+**3. From Python** — pass an `aliases=` dict. Keys can be the input
+identifier, the resolved gene name, or the UniProt accession; matching is
+case-insensitive, so any of these work:
 
 ```python
-run_pipeline(["ERBB2", "EGFR"], aliases={"ERBB2": "HER2", "EGFR": "ErbB1"})
+from epitope_pipeline.run import run_pipeline
+
+result = run_pipeline(
+    ["ERBB2", "EGFR", "MSLN", "NECTIN4", "P56856-2"],
+    aliases={
+        "ERBB2":    "HER2",            # by input identifier
+        "egfr":     "ErbB1",           # case-insensitive
+        "P04356":   "Mesothelin",      # by UniProt accession
+        "NECTIN4":  "PVRL4",
+        "P56856-2": "CLDN18_2",
+    },
+    run_name="onco_panel_2026Q2",
+)
+
+# All downstream artifacts use the aliases
+df = result["metrics_df"]
+print(df["gene_name"].tolist())
+# → ['HER2', 'ErbB1', 'Mesothelin', 'PVRL4', 'CLDN18_2']
+print(df[["gene_name", "uniprot_id"]])  # original accession preserved
 ```
 
-Run `python -m epitope_pipeline.run --help` for the full flag list.
+After the run, `runs/onco_panel_2026Q2/Figures/her2_epitope_map.png`,
+`erbb1_epitope_map.png`, etc. are written using the lowercased aliases,
+and `Supplementary Files/summary_metrics.csv` carries the aliases in the
+`gene_name` column with the canonical UniProt IDs alongside for
+cross-referencing.
 
 ### Web Interface
 
