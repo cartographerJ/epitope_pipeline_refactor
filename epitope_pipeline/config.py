@@ -82,11 +82,17 @@ AA_1TO3 = {
 # ---------------------------------------------------------------------------
 # Conservation
 # ---------------------------------------------------------------------------
-# Whole-patch evaluation (NEW)
-MAX_CYNO_MISMATCH_PERCENT = 15.0        # Max % cyno mismatches to accept patch
+# Cyno-conservation mode selector:
+#   "local"       — sliding-window local-density test with trim-and-salvage
+#                   (default; faithful to the pre-2026-03 behavior)
+#   "whole_patch" — whole-patch average mismatch percentage (size-scaled)
+CYNO_MODE = "local"
 
-# DEPRECATED: Legacy sliding window threshold (not used in whole-patch mode)
-MAX_CYNO_MISMATCHES_PER_600A2 = 2       # Kept for backward compatibility only
+# Local mode: max cyno mismatches allowed in any ~600 Å² neighborhood of a patch
+MAX_CYNO_MISMATCHES_PER_600A2 = 2
+
+# Whole-patch mode: max % cyno mismatches to accept a patch (size-scaled to 30%)
+MAX_CYNO_MISMATCH_PERCENT = 15.0
 
 # ---------------------------------------------------------------------------
 # Specificity (BLAST)
