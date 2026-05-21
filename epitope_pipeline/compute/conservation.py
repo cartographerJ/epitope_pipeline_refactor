@@ -331,3 +331,170 @@ def evaluate_patch_conservation(patch, residue_conservation):
     passes = (mismatch_percent <= effective_threshold)
 
     return passes, mismatch_percent, effective_threshold
+
+
+# ---------------------------------------------------------------------------
+# Local sliding-window evaluation (faithful to pre-2026-03 behavior)
+# ---------------------------------------------------------------------------
+
+def check_local_mismatch_density(patch_residues, residue_conservation, ca_coords):
+    """
+    Sliding window: for every residue in the patch, examine its ~600A²
+    neighborhood (radius = sqrt(600/π) ≈ 13.8A) and count mismatches.
+
+    Returns (worst_resnum, worst_mismatch_count) — the residue whose
+    neighborhood has the most mismatches. (0, 0) if no coords available.
+    """
+    from scipy.spatial.distance import cdist
+
+    footprint_radius = math.sqrt(VHH_FOOTPRINT_MIN_A2 / math.pi)
+
+    res_with_coords = [r for r in patch_residues if r in ca_coords]
+    if not res_with_coords:
+        return (0, 0)
+
+    coords = np.array([ca_coords[r] for r in res_with_coords])
+    is_bad = np.array([
+        not residue_conservation.get(r, False) for r in res_with_coords
+    ])
+
+    dists = cdist(coords, coords)
+
+    worst_pos = 0
+    worst_count = 0
+    for i, resnum in enumerate(res_with_coords):
+        neighbors = dists[i] <= footprint_radius
+        local_bad = int(np.sum(is_bad[neighbors]))
+        if local_bad > worst_count:
+            worst_count = local_bad
+            worst_pos = resnum
+
+    return (worst_pos, worst_count)
+
+
+# Backward-compatible alias for the old private name
+_check_local_mismatch_density = check_local_mismatch_density
+
+
+def identify_failing_residues(patch_residues, boolean_map, ca_coords,
+                              max_bad_per_window):
+    """
+    Identify all residues whose ~600A² neighborhood contains more than
+    max_bad_per_window mismatches. These are the residues to trim.
+
+    Returns a set of residue numbers that should be trimmed.
+    """
+    from scipy.spatial.distance import cdist
+
+    footprint_radius = math.sqrt(VHH_FOOTPRINT_MIN_A2 / math.pi)
+
+    res_with_coords = [r for r in patch_residues if r in ca_coords]
+    if not res_with_coords:
+        return set()
+
+    coords = np.array([ca_coords[r] for r in res_with_coords])
+    is_bad = np.array([
+        not boolean_map.get(r, False) for r in res_with_coords
+    ])
+
+    dists = cdist(coords, coords)
+
+    failing = set()
+    for i, resnum in enumerate(res_with_coords):
+        neighbors = dists[i] <= footprint_radius
+        local_bad = int(np.sum(is_bad[neighbors]))
+        if local_bad > max_bad_per_window:
+            failing.add(resnum)
+
+    return failing
+
+
+def _check_conserved_subpatch(conserved_residues, ca_coords, residue_sasa):
+    """
+    Verify that conserved residues within a patch form a contiguous 3D region
+    large enough for a VHH CDR footprint (largest sub-cluster >= VHH min).
+    """
+    if len(conserved_residues) < 2:
+        area = sum(residue_sasa.get(r, 0.0) for r in conserved_residues)
+        return area >= VHH_FOOTPRINT_MIN_A2
+
+    from scipy.spatial.distance import pdist
+    from scipy.cluster.hierarchy import fcluster, linkage
+
+    res_list = sorted(conserved_residues)
+    coords = np.array([ca_coords[r] for r in res_list])
+
+    dist_matrix = pdist(coords)
+    Z = linkage(dist_matrix, method="single")
+    labels = fcluster(Z, t=PATCH_CLUSTERING_DISTANCE_A, criterion="distance")
+
+    clusters = {}
+    for res, label in zip(res_list, labels):
+        clusters.setdefault(label, []).append(res)
+
+    max_area = 0.0
+    for cluster_residues in clusters.values():
+        area = sum(residue_sasa.get(r, 0.0) for r in cluster_residues)
+        if area > max_area:
+            max_area = area
+
+    return max_area >= VHH_FOOTPRINT_MIN_A2
+
+
+def _recluster_survivors(survivors, ca_coords, residue_sasa, original_patch,
+                         residue_conservation, next_patch_id):
+    """
+    Re-cluster survivor residues after trimming and build new SurfacePatch
+    objects for sub-clusters >= VHH min that also pass the conserved sub-patch
+    contiguity check.
+    """
+    from epitope_pipeline.compute.surface import cluster_surface_patches, SurfacePatch
+    from scipy.spatial.distance import pdist
+
+    survivors_with_ca = [r for r in survivors if r in ca_coords]
+    if len(survivors_with_ca) < 2:
+        return []
+
+    clusters = cluster_surface_patches(survivors_with_ca, ca_coords)
+
+    result = []
+    pid = next_patch_id
+    for cluster_residues in clusters:
+        total_area = sum(residue_sasa.get(r, 0.0) for r in cluster_residues)
+        if total_area < VHH_FOOTPRINT_MIN_A2:
+            continue
+
+        conserved_in_cluster = [
+            r for r in cluster_residues
+            if residue_conservation.get(r, False) and r in ca_coords
+        ]
+        if not _check_conserved_subpatch(conserved_in_cluster, ca_coords, residue_sasa):
+            logger.info(
+                "      Sub-patch (%d residues, %.0f A²): conserved residues "
+                "don't form contiguous >= %.0f A², skipping",
+                len(cluster_residues), total_area, VHH_FOOTPRINT_MIN_A2,
+            )
+            continue
+
+        coords = np.array([ca_coords[r] for r in cluster_residues])
+        centroid = np.mean(coords, axis=0)
+
+        if len(coords) > 1:
+            max_dim = float(np.max(pdist(coords)))
+        else:
+            max_dim = 0.0
+
+        sp = SurfacePatch(
+            patch_id=pid,
+            residue_numbers=sorted(cluster_residues),
+            residue_aas={r: original_patch.residue_aas.get(r, "X")
+                         for r in cluster_residues},
+            total_sasa_a2=total_area,
+            centroid=centroid,
+            max_dimension_a=max_dim,
+            avg_distance_from_membrane=original_patch.avg_distance_from_membrane,
+        )
+        result.append(sp)
+        pid += 1
+
+    return result
