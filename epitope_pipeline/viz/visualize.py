@@ -574,6 +574,15 @@ def _collect_domain_blocks(target):
     return filtered
 
 
+def _distance_footer_str(distance_mode, distance_value):
+    """Footer fragment describing the spatial filter for the summary chart."""
+    if distance_mode == "whole_ecd":
+        return "whole ectodomain (no distance filter)"
+    if distance_mode == "proximal":
+        return "\u2264{:.0f}\u00c5 from membrane".format(distance_value or 40)
+    return "\u2265{:.0f}\u00c5 from membrane".format(distance_value or 80)
+
+
 def plot_scoring_summary(all_scores, target_metrics, targets, output_path,
                          distance_label=None, distance_value=None, distance_mode=None):
     """
@@ -647,10 +656,7 @@ def plot_scoring_summary(all_scores, target_metrics, targets, output_path,
 
     # Footer with filter parameters
     from epitope_pipeline import config
-    if distance_mode == "proximal":
-        dist_str = "\u2264{:.0f}\u00c5 from membrane".format(distance_value or 40)
-    else:
-        dist_str = "\u2265{:.0f}\u00c5 from membrane".format(distance_value or 80)
+    dist_str = _distance_footer_str(distance_mode, distance_value)
     cyno_conserved = 100.0 - config.MAX_CYNO_MISMATCH_PERCENT
     specific_pct = 100.0 - config.MAX_NONSPECIFIC_PERCENT
     footer = "Filtered: {}, SASA >{:.0f}%, \u2265{:.0f}% cyno conserved (scaled), \u2265{:.0f}% specific (scaled)".format(
