@@ -530,6 +530,32 @@ targets = resolve_targets(["ERBB2"])
 # ... use individual modules as needed
 ```
 
+## Single-protein ECD suitability
+
+To assess whether one protein's **whole extracellular domain** is a suitable VHH-epitope target — with no distal/proximal zone framing — use the `epitope-single` entry point. Unlike the bispecific mode (which scores each target in a distal and a proximal membrane zone for complementary antibody arms), this mode applies **no distance filter**: the entire ectodomain surface is considered.
+
+```bash
+# One target
+epitope-single ERBB2
+
+# Several targets, with display aliases and the cyno gate relaxed
+epitope-single ERBB2=HER2 EGFR MSLN --cyno-mismatch-percent 25
+
+# From a file (one IDENT[=ALIAS] per line)
+epitope-single --targets-file targets.txt
+
+# Or as a module
+python -m epitope_pipeline.single ERBB2
+```
+
+```python
+from epitope_pipeline.single import run_single
+
+results = run_single(["ERBB2"])
+```
+
+It evaluates the entire ectodomain surface for druggable, cyno-conserved, human-specific epitope patches and writes the same run artifacts (figures, summary CSV, exports) as the standard pipeline. Suitability is read off the per-target patch counts and scores in the summary outputs. The run parameters record the mode as `whole ectodomain (no distance filter)`.
+
 ## Bispecific Dual-Targeting Mode
 
 Evaluates pairs of membrane protein targets for complementary epitope space suitable for bispecific antibody design. One target provides a "distal" epitope (>=60A from membrane surface) and the other provides a "proximal" epitope (<=40A from membrane surface). Both orientations are tested for each pair.
