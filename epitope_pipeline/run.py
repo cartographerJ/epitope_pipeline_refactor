@@ -48,6 +48,19 @@ logger = logging.getLogger("epitope_pipeline")
 
 
 # ---------------------------------------------------------------------------
+# Pure helpers
+# ---------------------------------------------------------------------------
+
+def _mode_label(no_distance_filter, max_distance_a):
+    """Human-readable spatial-mode label for the run parameters block."""
+    if no_distance_filter:
+        return "whole ectodomain (no distance filter)"
+    if max_distance_a:
+        return "proximal (max_distance_a={})".format(max_distance_a)
+    return "distal (min_distance_a={})".format(config.ECTODOMAIN_MIN_DISTANCE_A)
+
+
+# ---------------------------------------------------------------------------
 # Pipeline orchestrator
 # ---------------------------------------------------------------------------
 
@@ -144,7 +157,7 @@ def run_pipeline(
 
     # Record parameters used
     parameters = {
-        "mode": "proximal (max_distance_a={})".format(max_distance_a) if max_distance_a else "distal (min_distance_a={})".format(config.ECTODOMAIN_MIN_DISTANCE_A),
+        "mode": _mode_label(no_distance_filter, max_distance_a),
         "min_distance_a": config.ECTODOMAIN_MIN_DISTANCE_A,
         "max_distance_a": max_distance_a,
         "cyno_mismatch_percent_base": config.MAX_CYNO_MISMATCH_PERCENT,
