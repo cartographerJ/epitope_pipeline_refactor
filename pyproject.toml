@@ -27,6 +27,7 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 epitope-pipeline = "epitope_pipeline.run:main"
 epitope-bispecific = "epitope_pipeline.bispecific:main"
+epitope-single = "epitope_pipeline.single:main"
 
 [tool.setuptools.packages.find]
 include = ["epitope_pipeline*"]
