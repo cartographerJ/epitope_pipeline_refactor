@@ -1,11 +1,12 @@
 """
 Step 6: Cynomolgus Monkey Conservation — map sequence conservation onto
-surface patches and filter by percentage of mismatched residues.
+surface patches and filter divergent patches.
 
 Performs pairwise Needleman-Wunsch alignment between human and cyno
 ortholog sequences, maps conservation per-residue onto the 3D structure,
-and evaluates each surface patch as an atomic unit. Patches with ≤15%
-mismatched residues pass filtering (default threshold).
+and evaluates each surface patch. Two modes are available (config.CYNO_MODE):
+"local" (default) — a sliding-window local-density test with trim-and-salvage;
+"whole_patch" — a size-scaled whole-patch mismatch percentage.
 """
 
 import logging
@@ -51,20 +52,25 @@ class ConservationError(Exception):
 # Public API
 # ---------------------------------------------------------------------------
 
-def analyze_conservation(target, surface_analysis, ca_coords=None):
+def analyze_conservation(target, surface_analysis, ca_coords=None,
+                         cyno_mode=None, max_mismatches_per_window=None):
     """
     Map cynomolgus monkey conservation onto surface patches and filter.
 
     Steps:
       1. Align human and cyno sequences (Needleman-Wunsch, BLOSUM62)
       2. Map alignment to per-residue identity
-      3. For each surface patch: calculate percentage of mismatched residues
-      4. Accept patches with ≤15% mismatches (configurable threshold)
+      3. Evaluate each surface patch using either:
+         - "local" mode (default): sliding-window trim-and-salvage algorithm
+         - "whole_patch" mode: whole-patch mismatch percentage rule
+      4. Accept patches that pass the selected mode's criteria.
 
     Args:
         target: TargetInfo with sequence and cyno_sequence.
         surface_analysis: SurfaceAnalysis with patches to evaluate.
-        ca_coords: Optional dict {resnum: np.array} (deprecated, not used).
+        ca_coords: Optional dict {resnum: np.array} of Cα coordinates.
+        cyno_mode: "local" or "whole_patch"; overrides config.CYNO_MODE.
+        max_mismatches_per_window: Override for config.MAX_CYNO_MISMATCHES_PER_600A2.
 
     Returns:
         ConservationResult with filtered patches and conservation data.
@@ -108,42 +114,131 @@ def analyze_conservation(target, surface_analysis, ca_coords=None):
             patch_conservation={},
         )
 
-    # Step 3: Evaluate each patch (whole-patch mode, no trimming)
+    # Resolve mode (params override config default)
+    mode = cyno_mode if cyno_mode is not None else config.CYNO_MODE
+
     conserved_patches = []
     rejected_patches = []
     patch_conservation = {}
 
-    for patch in surface_analysis.patches:
-        # Calculate patch-level metrics
-        n_residues = len(patch.residue_numbers)
-        n_conserved = sum(
-            1 for r in patch.residue_numbers
-            if residue_conservation.get(r, False)
-        )
-        n_mismatches = n_residues - n_conserved
-        identity_fraction = n_conserved / n_residues if n_residues > 0 else 0.0
-        mismatch_percent = (n_mismatches / n_residues) * 100.0
+    if mode == "local":
+        max_bad = (max_mismatches_per_window if max_mismatches_per_window is not None
+                   else config.MAX_CYNO_MISMATCHES_PER_600A2)
+        if not ca_coords:
+            logger.warning(
+                "  %s: local cyno mode needs Cα coords for the sliding-window "
+                "test; none provided — patches pass without local filtering",
+                target.gene_name,
+            )
+        next_patch_id = max(p.patch_id for p in surface_analysis.patches) + 1
+        for patch in surface_analysis.patches:
+            n_residues = len(patch.residue_numbers)
+            n_conserved = sum(
+                1 for r in patch.residue_numbers
+                if residue_conservation.get(r, False)
+            )
+            n_mismatches = n_residues - n_conserved
+            identity = n_conserved / n_residues if n_residues > 0 else 0.0
+            patch_conservation[patch.patch_id] = identity
+            logger.info(
+                "    Patch %d: %d residues (%.0f A²), cyno identity %.1f%% "
+                "(%d/%d conserved, %d mismatches)",
+                patch.patch_id, n_residues, patch.total_sasa_a2,
+                identity * 100, n_conserved, n_residues, n_mismatches,
+            )
 
-        patch_conservation[patch.patch_id] = identity_fraction
+            # Gate 1: sliding window — trim mismatch-dense residues, salvage survivors
+            if ca_coords and n_mismatches > 0:
+                worst_pos, worst_count = check_local_mismatch_density(
+                    patch.residue_numbers, residue_conservation, ca_coords,
+                )
+                if worst_count > max_bad:
+                    failing = identify_failing_residues(
+                        patch.residue_numbers, residue_conservation, ca_coords, max_bad,
+                    )
+                    survivors = [r for r in patch.residue_numbers if r not in failing]
+                    logger.info(
+                        "      Sliding window: %d residues in mismatch-dense zones "
+                        "(worst: res %d with %d), trimming...",
+                        len(failing), worst_pos, worst_count,
+                    )
+                    sub_patches = _recluster_survivors(
+                        survivors, ca_coords, surface_analysis.residue_sasa,
+                        patch, residue_conservation, next_patch_id,
+                    )
+                    if sub_patches:
+                        for sp in sub_patches:
+                            sp_n = len(sp.residue_numbers)
+                            sp_conserved = sum(
+                                1 for r in sp.residue_numbers
+                                if residue_conservation.get(r, False)
+                            )
+                            sp_identity = sp_conserved / sp_n if sp_n > 0 else 0.0
+                            patch_conservation[sp.patch_id] = sp_identity
+                            conserved_patches.append(sp)
+                            logger.info(
+                                "      -> Sub-patch %d: %d residues, %.0f A², "
+                                "cyno %.1f%% -> PASSED",
+                                sp.patch_id, sp_n, sp.total_sasa_a2, sp_identity * 100,
+                            )
+                            next_patch_id = sp.patch_id + 1
+                    else:
+                        rejected_patches.append((patch, identity))
+                        logger.info(
+                            "      -> REJECTED (no surviving sub-patches >= %.0f A²)",
+                            VHH_FOOTPRINT_MIN_A2,
+                        )
+                    continue
+                logger.info(
+                    "      Sliding window OK (worst: %d mismatches near res %d)",
+                    worst_count, worst_pos,
+                )
 
-        logger.info(
-            "    Patch %d: %d residues (%.0f A²), cyno identity %.1f%% "
-            "(%d conserved, %d mismatches = %.1f%%)",
-            patch.patch_id, n_residues, patch.total_sasa_a2,
-            identity_fraction * 100, n_conserved, n_mismatches, mismatch_percent,
-        )
+            # Gate 2: conserved residues must form a contiguous >= VHH-min patch
+            if ca_coords:
+                conserved_residues = [
+                    r for r in patch.residue_numbers
+                    if residue_conservation.get(r, False) and r in ca_coords
+                ]
+                if not _check_conserved_subpatch(
+                        conserved_residues, ca_coords, surface_analysis.residue_sasa):
+                    rejected_patches.append((patch, identity))
+                    logger.info(
+                        "      -> REJECTED (conserved residues don't form contiguous "
+                        "patch >= %.0f A²)", VHH_FOOTPRINT_MIN_A2,
+                    )
+                    continue
 
-        # Whole-patch evaluation (threshold scales with patch size)
-        passes, _, effective_thresh = evaluate_patch_conservation(patch, residue_conservation)
-
-        if passes:
             conserved_patches.append(patch)
-            logger.info("      -> PASSED (%.1f%% mismatches <= %.1f%% threshold, %d residues)",
-                       mismatch_percent, effective_thresh, n_residues)
-        else:
-            rejected_patches.append((patch, identity_fraction))
-            logger.info("      -> REJECTED (%.1f%% mismatches > %.1f%% threshold, %d residues)",
-                       mismatch_percent, effective_thresh, n_residues)
+            logger.info("      -> PASSED")
+    else:
+        # Whole-patch mode: average mismatch percentage (threshold scales with size)
+        for patch in surface_analysis.patches:
+            n_residues = len(patch.residue_numbers)
+            n_conserved = sum(
+                1 for r in patch.residue_numbers
+                if residue_conservation.get(r, False)
+            )
+            n_mismatches = n_residues - n_conserved
+            identity_fraction = n_conserved / n_residues if n_residues > 0 else 0.0
+            mismatch_percent = (n_mismatches / n_residues) * 100.0
+            patch_conservation[patch.patch_id] = identity_fraction
+            logger.info(
+                "    Patch %d: %d residues (%.0f A²), cyno identity %.1f%% "
+                "(%d conserved, %d mismatches = %.1f%%)",
+                patch.patch_id, n_residues, patch.total_sasa_a2,
+                identity_fraction * 100, n_conserved, n_mismatches, mismatch_percent,
+            )
+            passes, _, effective_thresh = evaluate_patch_conservation(
+                patch, residue_conservation)
+            if passes:
+                conserved_patches.append(patch)
+                logger.info("      -> PASSED (%.1f%% mismatches <= %.1f%% threshold, %d residues)",
+                            mismatch_percent, effective_thresh, n_residues)
+            else:
+                rejected_patches.append((patch, identity_fraction))
+                logger.info("      -> REJECTED (%.1f%% mismatches > %.1f%% threshold, %d residues)",
+                            mismatch_percent, effective_thresh, n_residues)
 
     logger.info(
         "  %s conservation: %d patches pass, %d rejected",
