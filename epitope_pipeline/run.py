@@ -60,6 +60,27 @@ def _mode_label(no_distance_filter, max_distance_a):
     return "distal (min_distance_a={})".format(config.ECTODOMAIN_MIN_DISTANCE_A)
 
 
+def _summary_distance_args(no_distance_filter, max_distance_a):
+    """Distance kwargs for plot_scoring_summary, honest about whole-ECD runs."""
+    if no_distance_filter:
+        return {
+            "distance_label": "whole ECD",
+            "distance_value": None,
+            "distance_mode": "whole_ecd",
+        }
+    if max_distance_a:
+        return {
+            "distance_label": "\u2264{:.0f}\u00c5".format(max_distance_a),
+            "distance_value": max_distance_a,
+            "distance_mode": "proximal",
+        }
+    return {
+        "distance_label": "\u2265{:.0f}\u00c5".format(config.ECTODOMAIN_MIN_DISTANCE_A),
+        "distance_value": config.ECTODOMAIN_MIN_DISTANCE_A,
+        "distance_mode": "distal",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Pipeline orchestrator
 # ---------------------------------------------------------------------------
@@ -493,9 +514,7 @@ def run_pipeline(
             target_metrics=all_metrics,
             targets=targets,
             output_path=str(figures_dir / "scoring_summary.png"),
-            distance_label="\u226440\u00c5" if max_distance_a else "\u226580\u00c5",
-            distance_value=max_distance_a or config.ECTODOMAIN_MIN_DISTANCE_A,
-            distance_mode="proximal" if max_distance_a else "distal",
+            **_summary_distance_args(no_distance_filter, max_distance_a),
         )
 
     # =====================================================================
