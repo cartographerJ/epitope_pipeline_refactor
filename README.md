@@ -195,7 +195,7 @@ VHH antibodies bind contiguous ~600 A² surface patches as atomic units. The CDR
 
 ### Default Thresholds
 
-- **Cyno conservation**: size-scaled threshold `min(base% * sqrt(n/20), 30%)`, base=`MAX_CYNO_MISMATCH_PERCENT` (default 15%)
+- **Cyno conservation**: two modes (default **local**) — see [Cyno conservation modes](#cyno-conservation-modes) below. Local uses a sliding-window per-~600 Å² limit (`MAX_CYNO_MISMATCHES_PER_600A2`, default 2); whole-patch uses the size-scaled `min(base% * sqrt(n/20), 30%)`, base=`MAX_CYNO_MISMATCH_PERCENT` (default 15%).
 - **Human specificity (paralog homology)**: per-paralog patch rule — a patch fails if **any single paralog** matches more than `MAX_NONSPECIFIC_PERCENT` of the patch residues (default 85%, i.e. min 15% unique relative to every paralog individually).
 - **Post-filtering merge**: 15Å centroid distance (`MERGE_DISTANCE_THRESHOLD_A`)
 
@@ -206,6 +206,34 @@ This replaces the prior "max HSP identity per residue" aggregate, which had two 
 
 A 20-residue patch with 3 cyno mismatches = 15.0% → **PASS** (at threshold)
 A 25-residue patch with 4 cyno mismatches = 16.0% → **REJECT** (above threshold)
+
+### Cyno conservation modes
+
+Cyno-conservation filtering runs in one of two modes (default **local**):
+
+- **`local`** (default) — a sliding-window local-density test. Every ~600 Å²
+  neighborhood (~one VHH footprint) of a patch may contain at most
+  `--cyno-max-window-mismatches` cyno mismatches (default **2**); residues in
+  mismatch-dense zones are trimmed and the survivors re-clustered into
+  sub-patches ≥600 Å². This is strict about *local* conservation and is the
+  faithful pre-2026-03 behavior.
+- **`whole-patch`** — a whole-patch *average* mismatch percentage, size-scaled:
+  `min(--cyno-mismatch-percent × √(n/20), 30%)`. Permissive for large patches.
+
+```bash
+# Default (local), tighten the per-window limit
+epitope-single ERBB2 --cyno-max-window-mismatches 1
+
+# Opt into the permissive whole-patch average instead
+epitope-single ERBB2 --cyno-mode whole-patch --cyno-mismatch-percent 20
+```
+
+`--cyno-mismatch-percent` applies only to `whole-patch` mode;
+`--cyno-max-window-mismatches` applies only to `local` mode. `--no-cyno` still
+bypasses the gate entirely. All three entry points (`epitope-pipeline`,
+`epitope-single`, `epitope-bispecific`) accept these flags. The size-scaled
+percentage rule described above (and elsewhere in this README) applies to
+`whole-patch` mode.
 
 ### Tuning Guidance
 
