@@ -93,6 +93,7 @@ def run_pipeline(
     no_distance_filter=False,
     cyno_max_mismatches=None,
     cyno_mismatch_percent=None,
+    cyno_mode=None,
     skip_cyno_gate=False,
     nonspecific_percent=None,
     force_experimental=False,
@@ -109,8 +110,12 @@ def run_pipeline(
         max_distance_a: Override max ectodomain distance (proximal mode).
             When set, pipeline finds epitopes <= max_distance_a from membrane
             instead of >= min_distance_a.
-        cyno_max_mismatches: Override max cyno mismatches per 600A² (default 2).
-        cyno_mismatch_percent: Override per-patch cyno mismatch threshold (default 15%).
+        cyno_max_mismatches: Override max cyno mismatches per 600A² window
+            (local mode threshold; default 2).
+        cyno_mismatch_percent: Override per-patch cyno mismatch threshold
+            (whole_patch mode; default 15%).
+        cyno_mode: Cyno conservation mode, "local" (default) or "whole_patch";
+            overrides config.CYNO_MODE.
         skip_cyno_gate: If True, bypass the cyno-conservation short-circuit so
             scoring proceeds for all surface patches regardless of cyno divergence.
             Per-residue cyno identity is still computed and reported. Useful for
@@ -135,6 +140,8 @@ def run_pipeline(
         config.ECTODOMAIN_MIN_DISTANCE_A = min_distance_a
     if cyno_max_mismatches is not None:
         config.MAX_CYNO_MISMATCHES_PER_600A2 = cyno_max_mismatches
+    if cyno_mode is not None:
+        config.CYNO_MODE = cyno_mode
     if cyno_mismatch_percent is not None:
         config.MAX_CYNO_MISMATCH_PERCENT = cyno_mismatch_percent
     if nonspecific_percent is not None:
@@ -181,6 +188,8 @@ def run_pipeline(
         "mode": _mode_label(no_distance_filter, max_distance_a),
         "min_distance_a": config.ECTODOMAIN_MIN_DISTANCE_A,
         "max_distance_a": max_distance_a,
+        "cyno_mode": config.CYNO_MODE,
+        "cyno_max_mismatches_per_600a2": config.MAX_CYNO_MISMATCHES_PER_600A2,
         "cyno_mismatch_percent_base": config.MAX_CYNO_MISMATCH_PERCENT,
         "cyno_mismatch_scaling": "min(base% * sqrt(n_residues/20), 30%)",
         "cyno_gate_skipped": skip_cyno_gate,
@@ -618,6 +627,15 @@ def build_argparser():
     parser.add_argument("--cyno-mismatch-percent", type=float,
                         dest="cyno_mismatch_percent",
                         help="Per-patch cyno mismatch tolerance (default 15)")
+    parser.add_argument("--cyno-mode", choices=["local", "whole-patch"],
+                        default=None, dest="cyno_mode",
+                        help="Cyno conservation mode (default: local). "
+                             "'local' = sliding-window local test; "
+                             "'whole-patch' = average %% mismatch.")
+    parser.add_argument("--cyno-max-window-mismatches", type=int, default=None,
+                        dest="cyno_max_mismatches",
+                        help="Local mode: max cyno mismatches per ~600 Å² window "
+                             "(default: 2)")
     parser.add_argument("--no-cyno", action="store_true", dest="skip_cyno_gate",
                         help="Bypass the cyno-conservation gate entirely "
                              "(per-residue cyno identity is still reported)")
@@ -665,6 +683,8 @@ def main():
         max_distance_a=max_distance,
         no_distance_filter=args.no_distance_filter,
         cyno_mismatch_percent=args.cyno_mismatch_percent,
+        cyno_mode=(args.cyno_mode.replace("-", "_") if args.cyno_mode else None),
+        cyno_max_mismatches=args.cyno_max_mismatches,
         skip_cyno_gate=args.skip_cyno_gate,
         nonspecific_percent=args.nonspecific_percent,
         force_experimental=args.force_experimental,

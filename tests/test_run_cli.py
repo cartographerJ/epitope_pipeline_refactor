@@ -162,3 +162,23 @@ def test_combined_flags(captured, monkeypatch, tmp_path):
     assert c["skip_cyno_gate"] is True
     assert c["cyno_mismatch_percent"] == 30.0
     assert c["run_name"] == "verify"
+
+
+def test_cyno_mode_default_is_none(captured, monkeypatch):
+    _invoke(monkeypatch, ["ERBB2"])
+    assert captured[0]["cyno_mode"] is None
+
+
+def test_cyno_mode_whole_patch(captured, monkeypatch):
+    _invoke(monkeypatch, ["ERBB2", "--cyno-mode", "whole-patch"])
+    assert captured[0]["cyno_mode"] == "whole_patch"
+
+
+def test_cyno_mode_local(captured, monkeypatch):
+    _invoke(monkeypatch, ["ERBB2", "--cyno-mode", "local"])
+    assert captured[0]["cyno_mode"] == "local"
+
+
+def test_cyno_max_window_mismatches(captured, monkeypatch):
+    _invoke(monkeypatch, ["ERBB2", "--cyno-max-window-mismatches", "3"])
+    assert captured[0]["cyno_max_mismatches"] == 3
