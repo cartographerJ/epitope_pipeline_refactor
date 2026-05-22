@@ -24,6 +24,8 @@ def run_single(
     identifiers,
     run_name=None,
     cyno_mismatch_percent=None,
+    cyno_mode=None,
+    cyno_max_mismatches=None,
     skip_cyno_gate=False,
     nonspecific_percent=None,
     force_experimental=False,
@@ -36,10 +38,11 @@ def run_single(
     ectodomain surface is evaluated for druggable, cyno-conserved,
     human-specific epitope patches. No distal/proximal zones are applied.
 
-    Args mirror run_pipeline's non-distance arguments, except the deprecated
-    cyno_max_mismatches count is intentionally omitted — use
-    cyno_mismatch_percent for cyno-conservation tuning. See run_pipeline for
-    the structure of the returned dict.
+    Args mirror run_pipeline's non-distance arguments. Cyno conservation runs
+    in config.CYNO_MODE by default ("local"); pass cyno_mode="whole_patch" for
+    the average-percentage test. cyno_max_mismatches is the local-mode per-~600
+    Å² window threshold; cyno_mismatch_percent tunes whole_patch mode. See
+    run_pipeline for the structure of the returned dict.
     """
     if run_name is None:
         slug = "_".join(i.lower()[:8] for i in identifiers[:3])
@@ -54,6 +57,8 @@ def run_single(
         run_name=run_name,
         no_distance_filter=True,
         cyno_mismatch_percent=cyno_mismatch_percent,
+        cyno_mode=cyno_mode,
+        cyno_max_mismatches=cyno_max_mismatches,
         skip_cyno_gate=skip_cyno_gate,
         nonspecific_percent=nonspecific_percent,
         force_experimental=force_experimental,
@@ -85,6 +90,15 @@ def build_argparser():
     parser.add_argument("--cyno-mismatch-percent", type=float,
                         dest="cyno_mismatch_percent",
                         help="Per-patch cyno mismatch tolerance (default 15)")
+    parser.add_argument("--cyno-mode", choices=["local", "whole-patch"],
+                        default=None, dest="cyno_mode",
+                        help="Cyno conservation mode (default: local). "
+                             "'local' = sliding-window local test; "
+                             "'whole-patch' = average %% mismatch.")
+    parser.add_argument("--cyno-max-window-mismatches", type=int, default=None,
+                        dest="cyno_max_mismatches",
+                        help="Local mode: max cyno mismatches per ~600 Å² window "
+                             "(default: 2)")
     parser.add_argument("--no-cyno", action="store_true", dest="skip_cyno_gate",
                         help="Bypass the cyno-conservation gate entirely "
                              "(per-residue cyno identity is still reported)")
@@ -124,6 +138,8 @@ def main():
         identifiers,
         run_name=args.run_name,
         cyno_mismatch_percent=args.cyno_mismatch_percent,
+        cyno_mode=(args.cyno_mode.replace("-", "_") if args.cyno_mode else None),
+        cyno_max_mismatches=args.cyno_max_mismatches,
         skip_cyno_gate=args.skip_cyno_gate,
         nonspecific_percent=args.nonspecific_percent,
         force_experimental=args.force_experimental,

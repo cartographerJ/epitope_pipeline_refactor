@@ -69,3 +69,18 @@ def test_distance_flags_rejected(monkeypatch, capsys, flag):
     with pytest.raises(SystemExit):
         single_module.main()
     assert "unrecognized arguments" in capsys.readouterr().err.lower()
+
+
+def test_single_cyno_mode_whole_patch(captured, monkeypatch):
+    _invoke(monkeypatch, ["ERBB2", "--cyno-mode", "whole-patch"])
+    assert captured[0]["cyno_mode"] == "whole_patch"
+
+
+def test_single_cyno_mode_default_none(captured, monkeypatch):
+    _invoke(monkeypatch, ["ERBB2"])
+    assert captured[0]["cyno_mode"] is None
+
+
+def test_single_cyno_max_window_mismatches(captured, monkeypatch):
+    _invoke(monkeypatch, ["ERBB2", "--cyno-max-window-mismatches", "4"])
+    assert captured[0]["cyno_max_mismatches"] == 4
