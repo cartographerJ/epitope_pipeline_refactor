@@ -92,6 +92,7 @@ def run_bispecific(
     proximal_max_distance_a=None,
     cyno_max_mismatches=None,
     cyno_mismatch_percent=None,
+    cyno_mode=None,
     nonspecific_percent=None,
     force_experimental=False,
     verbose=True,
@@ -104,8 +105,12 @@ def run_bispecific(
         run_name: Optional custom run directory name.
         distal_min_distance_a: Override distal threshold (default 60A).
         proximal_max_distance_a: Override proximal threshold (default 40A).
-        cyno_max_mismatches: Override max cyno mismatches per 600A² (default 2) [DEPRECATED].
-        cyno_mismatch_percent: Override cyno mismatch percent threshold (default 15.0).
+        cyno_max_mismatches: Override max cyno mismatches per 600A² window
+            (local mode threshold; default 2).
+        cyno_mismatch_percent: Override cyno mismatch percent threshold
+            (whole_patch mode; default 15.0).
+        cyno_mode: Cyno conservation mode, "local" (default) or "whole_patch";
+            overrides config.CYNO_MODE.
         nonspecific_percent: Override nonspecific percent threshold (default 15.0).
         force_experimental: Use experimental PDB instead of AlphaFold.
         verbose: Whether to log to console.
@@ -125,6 +130,8 @@ def run_bispecific(
     # Apply legacy threshold overrides (deprecated)
     if cyno_max_mismatches is not None:
         config.MAX_CYNO_MISMATCHES_PER_600A2 = cyno_max_mismatches
+    if cyno_mode is not None:
+        config.CYNO_MODE = cyno_mode
 
     # --- Setup logging ---
     setup_logging(verbose)
@@ -359,6 +366,8 @@ def run_bispecific(
         "mode": "bispecific",
         "distal_min_distance_a": distal_dist,
         "proximal_max_distance_a": proximal_dist,
+        "cyno_mode": config.CYNO_MODE,
+        "cyno_max_mismatches_per_600a2": config.MAX_CYNO_MISMATCHES_PER_600A2,
         "cyno_mismatch_percent_base": config.MAX_CYNO_MISMATCH_PERCENT,
         "cyno_mismatch_scaling": "min(base% * sqrt(n_residues/20), 30%)",
         "nonspecific_percent_base": config.MAX_NONSPECIFIC_PERCENT,
@@ -647,6 +656,15 @@ def main():
                         help="Distal min distance (A), default 60")
     parser.add_argument("--proximal", type=float, default=None,
                         help="Proximal max distance (A), default 40")
+    parser.add_argument("--cyno-mode", choices=["local", "whole-patch"],
+                        default=None, dest="cyno_mode",
+                        help="Cyno conservation mode (default: local). "
+                             "'local' = sliding-window local test; "
+                             "'whole-patch' = average %% mismatch.")
+    parser.add_argument("--cyno-max-window-mismatches", type=int, default=None,
+                        dest="cyno_max_mismatches",
+                        help="Local mode: max cyno mismatches per ~600 Å² window "
+                             "(default: 2)")
     args = parser.parse_args()
 
     pairs = []
@@ -661,6 +679,8 @@ def main():
         pairs,
         distal_min_distance_a=args.distal,
         proximal_max_distance_a=args.proximal,
+        cyno_mode=(args.cyno_mode.replace("-", "_") if args.cyno_mode else None),
+        cyno_max_mismatches=args.cyno_max_mismatches,
     )
 
     print("\nDone: {}".format(results["run_dir"]))
